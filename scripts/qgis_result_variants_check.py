@@ -25,10 +25,10 @@ with TemporaryDirectory() as directory:
                     clip_results=True, crs_wkt=QgsCoordinateReferenceSystem('EPSG:3857').toWkt(),
                     tiles=[dict(id=tile.name)])
     record = dict(tile=tile, manifest=manifest, directory=str(root))
-    panel = SimpleNamespace(project=QgsProject(), generation_directory=root,
+    panel = SimpleNamespace(project=QgsProject(), run_group=None, generation_directory=root,
                             _generation_records={tile.name:record}, seam_sources={},
                             results=QListWidget(), _set_tile_status=lambda *a:None, _tell=lambda *a:None)
-    for method in ('_store_result', '_add_raster'):
+    for method in ('_store_result', '_add_raster', '_mapstyle_groups'):
         setattr(panel, method, MethodType(getattr(BackgroundPanel, method), panel))
     variants = {'original':'AI original', 'copy':'Overlap restored', 'blend':'Blended overlap'}
     for mode, variant in variants.items():
@@ -47,7 +47,12 @@ with TemporaryDirectory() as directory:
             assert anchor['png'] == str(root/entries[0]['full_image'])
             assert panel.seam_sources[tile.name] == anchor
             groups = panel.project.layerTreeRoot().children()[0].children()
-            assert {g.name():g.itemVisibilityChecked() for g in groups} == {'Results · ' + variant: True}
+            assert [g.name() for g in groups] == ['Generated Tiles', 'Tile Grid', 'Input Layers']
+            assert [n.name() for n in groups[0].findLayers()] == [tile.name]
+            previous_id = groups[0].findLayers()[0].layerId()
+            panel._store_result(tile, record, str(root/'response.png'), 'manual_import')
+            assert len(groups[0].findLayers()) == 1
+            assert panel.project.mapLayer(previous_id) is None
             stored = json.loads((root/'manifest.json').read_text())
             assert stored['overlap_mode'] == mode
             assert stored['tiles'][0]['results'][0]['variant'] == variant

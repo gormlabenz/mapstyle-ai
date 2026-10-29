@@ -624,7 +624,7 @@ class BackgroundPanel(QDockWidget):
         self.table.setColumnCount(0)
         self.grid_layers = []
         self.tile_features = {}
-        self._previous_grid_group_name = None
+        self.run_group = None
         self.tiles_page.setTitle('Tiles')
         self._tell('Project changed. Set a new area.')
 
@@ -646,7 +646,8 @@ class BackgroundPanel(QDockWidget):
         if abs(canvas.rotation()) > 1e-6:
             raise ValueError('Set map rotation to 0° first.')
         settings = QgsMapSettings(canvas.mapSettings())
-        if self._grid_area is None:
+        new_area = self._grid_area is None
+        if new_area:
             display_crs = settings.destinationCrs()
             if not display_crs.isValid():
                 raise ValueError('Set a valid project CRS first.')
@@ -667,8 +668,7 @@ class BackgroundPanel(QDockWidget):
                 epsg = (32600 if lat >= 0 else 32700) + zone
             crs = QgsCoordinateReferenceSystem(f'EPSG:{epsg}')
             extent = QgsCoordinateTransform(area_crs, crs, self.project).transformBoundingBox(extent)
-            self._grid_area = (rect_tuple(extent), crs)
-        bounds, crs = self._grid_area
+        bounds, crs = (rect_tuple(extent), crs) if new_area else self._grid_area
         settings.setDestinationCrs(crs)
         settings.setOutputDpi(96)
         pixels = self.pixels.currentData()
@@ -682,6 +682,11 @@ class BackgroundPanel(QDockWidget):
                                          self.border.currentIndex() == 1, tile_size=side, origin=origin)
         if not tiles:
             raise ValueError('No full tile fits this area. Choose full coverage or a smaller tile size.')
+        if new_area:
+            # Keep previous runs and their layers; only rebuild the active grid.
+            self.run_group = None
+            self.grid_layers = []
+        self._grid_area = (bounds, crs)
         self.tiles = tiles
         self.plan = dict(bounds=bounds, resolution=resolution, tile_size_m=side, grid_origin=origin, fitted=self._fitted_size is not None,
                          pixels=pixels, halo=halo, crs=crs, settings=settings, dirty=False,
@@ -717,20 +722,40 @@ class BackgroundPanel(QDockWidget):
         self.select_all()
         self._tell('Grid created. Area and tiles are fixed in map coordinates. All tiles selected.')
 
-    def _make_grid_layers(self):
-        for layer_id in self.grid_layers:
-            if self.project.mapLayer(layer_id):
-                self.project.removeMapLayer(layer_id)
+    def _remove_grid_layers(self):
+        self.project.removeMapLayers([layer_id for layer_id in self.grid_layers
+                                      if self.project.mapLayer(layer_id)])
         self.grid_layers = []
         self.tile_features = {}
+        self.core_layer_id = ''
+
+    def _mapstyle_groups(self):
         root = self.project.layerTreeRoot()
-        group = root.insertGroup(0, 'AI · Tile grid')
-        # Empty old groups are removed only if they were created by this panel.
-        old_group = root.findGroup(getattr(self, '_previous_grid_group_name', '') or '')
-        if old_group is not None and old_group != group and not old_group.children():
-            old_group.parent().removeChildNode(old_group)
-        group.setName('AI · Tile grid · ' + uuid.uuid4().hex[:6])
-        self._previous_grid_group_name = group.name()
+        group = root.findGroup(self.run_group) if self.run_group else None
+        if group is None:
+            self.run_group = 'MapStyle · ' + datetime.now().astimezone().strftime('%Y-%m-%d-%H:%M:%S.%f')
+            group = root.insertGroup(0, self.run_group)
+        groups = []
+        for name in ('Generated Tiles', 'Tile Grid', 'Input Layers'):
+            child = group.findGroup(name)
+            if child is None and name == 'Input Layers':
+                child = group.findGroup('Live Inputs')
+                if child is not None:
+                    child.setName(name)
+            if child is None:
+                child = group.addGroup(name)
+                if name == 'Input Layers':
+                    child.setItemVisibilityChecked(False)
+                    child.setExpanded(False)
+            groups.append(child)
+        return groups
+
+    def _make_grid_layers(self):
+        self._remove_grid_layers()
+        if not self.plan or not self.tiles:
+            return
+        _, group, _ = self._mapstyle_groups()
+        group.setItemVisibilityChecked(self.show_frames.isChecked())
         for name, field, color in [('Tile cores', 'core', '#2879b9'), ('Inputs including context', 'source', '#df8c30')]:
             layer = QgsVectorLayer('Polygon?field=tile:string&field=row:integer&field=column:integer', name, 'memory')
             layer.setCrs(self.plan['crs'])
@@ -760,7 +785,7 @@ class BackgroundPanel(QDockWidget):
                 self.tile_features = {feature['tile']: feature.id() for feature in layer.getFeatures()}
                 self.core_layer_id = layer.id()
             self.grid_layers.append(layer.id())
-        self._grid_visibility()
+        self._selection_changed()
 
     def selected_tiles(self):
         names = {item.data(Qt.UserRole) for item in self.table.selectedItems()}
@@ -793,11 +818,17 @@ class BackgroundPanel(QDockWidget):
             layer.selectByIds([self.tile_features[tile.name] for tile in tiles if tile.name in self.tile_features])
 
     def _grid_visibility(self, *args):
+        root = self.project.layerTreeRoot()
+        group = root.findGroup(self.run_group) if self.run_group else None
+        if group is None:
+            return
+        grid = group.findGroup('Tile Grid')
+        if grid is not None:
+            grid.setItemVisibilityChecked(self.show_frames.isChecked())
         for index, layer_id in enumerate(self.grid_layers):
             node = self.project.layerTreeRoot().findLayer(layer_id)
             if node:
-                node.setItemVisibilityChecked(self.show_frames.isChecked() and
-                                             (index == 0 or self.show_overlap.isChecked()))
+                node.setItemVisibilityChecked(index == 0 or self.show_overlap.isChecked())
 
     def _output_directory(self):
         path = self.output.text().strip()
@@ -1109,13 +1140,8 @@ class BackgroundPanel(QDockWidget):
                              protected_mask=f'inputs/{name}-protected.png', protected=prepared['protected'],
                              neighbors=prepared['neighbors'], prompt=prompt)
         if self._load_export_inputs:
-            group = self.project.layerTreeRoot().findGroup(f'AI · {self.generation_directory.name}')
-            if group is None:
-                group = self.project.layerTreeRoot().insertGroup(1, f'AI · {self.generation_directory.name}')
-            inputs = next((g for g in group.children() if g.name()=='Live inputs'), None)
-            if inputs is None:
-                inputs = group.addGroup('Live inputs')
-            self._add_raster(prepared['tif'], f'{name} · Live input', inputs, visible=False)
+            _, _, inputs = self._mapstyle_groups()
+            self._add_raster(prepared['tif'], f'{name} · Input', inputs, visible=False)
         self._generation_state(name, 'prepared')
 
     def _accept_seam_result(self, name, filename, prepared):
@@ -1241,16 +1267,11 @@ class BackgroundPanel(QDockWidget):
         write_geotiff(png, tif, extent, manifest['crs_wkt'])
         context_tif = directory / 'results' / f'{stem}-context.tif'
         write_geotiff(original, context_tif, tile.source, manifest['crs_wkt'])
-        # Find by run path rather than a potentially removed layer tree wrapper.
-        group = self.project.layerTreeRoot().findGroup(f'AI · {directory.name}')
-        if group is None:
-            group = self.project.layerTreeRoot().insertGroup(1, f'AI · {directory.name}')
-        group_name = 'Results · ' + variant if variant else 'Results'
-        result_group = next((child for child in group.children() if child.name() == group_name), None)
-        if result_group is None:
-            result_group = group.insertGroup(0, group_name)
-            result_group.setItemVisibilityChecked(visible)
-        self._add_raster(tif, f'{tile.name} · {variant or "Result"}', result_group)
+        result_group, _, _ = self._mapstyle_groups()
+        previous = [node.layerId() for node in result_group.findLayers()
+                    if node.name() == tile.name and node.layer().customProperty('mapstyle_ai/owned', False)]
+        self._add_raster(tif, tile.name, result_group, visible=visible)
+        self.project.removeMapLayers(previous)
         for entry in manifest['tiles']:
             if entry['id'] == tile.name:
                 entry.setdefault('results', []).append(dict(

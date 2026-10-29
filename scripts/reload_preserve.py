@@ -33,6 +33,7 @@ if old:
         grid_area=getattr(old, '_grid_area', None), fitted_size=getattr(old, '_fitted_size', None),
         plan=old.plan, tiles=list(old.tiles), selected={tile.name for tile in old.selected_tiles()},
         grid_layers=list(old.grid_layers), grid_group=getattr(old,'_previous_grid_group_name',None),
+        run_group=old.run_group,
         seams=dict(getattr(old,'seam_sources',{})),
         prompt=None if not hasattr(old, 'references') and old.prompt.toPlainText() == old_default else old.prompt.toPlainText(),
         exported=dict(old.exported), statuses=dict(old.statuses),
@@ -112,8 +113,11 @@ if state:
                 status = state['statuses'][tile.name]
                 new._set_tile_status(tile, status_names.get(status, status))
         new.grid_layers = state['grid_layers']
-        new._previous_grid_group_name = state['grid_group']
+        new.run_group = state['run_group']
         new._make_grid_layers()
+        legacy_grid = new.project.layerTreeRoot().findGroup(state['grid_group'] or '')
+        if legacy_grid is not None and not legacy_grid.children():
+            legacy_grid.parent().removeChildNode(legacy_grid)
         for tile in new.tiles:
             if tile.name in state['selected']:
                 new.table.item(tile.row,tile.column).setSelected(True)

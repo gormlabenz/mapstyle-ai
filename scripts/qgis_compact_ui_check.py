@@ -92,17 +92,38 @@ QTest.mouseClick(panel.table.viewport(), Qt.LeftButton, pos=panel.table.visualIt
 assert len(panel.selected_tiles()) == 3
 QTest.mouseClick(panel.table.viewport(), Qt.LeftButton, pos=panel.table.visualItemRect(item).center())
 assert len(panel.selected_tiles()) == 4
-# One parent switch controls both map overlays, including after rebuilding.
+# Outlines belong to Area and tiles; toggling preserves the layers and their IDs.
 panel.show_overlap.setChecked(True)
+old_ids = list(panel.grid_layers)
+root_group = project.layerTreeRoot().findGroup(panel.run_group)
+assert panel.run_group.startswith('MapStyle · ')
+assert [g.name() for g in root_group.children()] == ['Generated Tiles', 'Tile Grid', 'Input Layers']
+grid_group = root_group.findGroup('Tile Grid')
+assert not root_group.findGroup('Input Layers').itemVisibilityChecked()
+assert not root_group.findGroup('Input Layers').isExpanded()
+selected_names = {tile.name for tile in panel.selected_tiles()}
 panel.show_frames.setChecked(False)
-assert all(not project.layerTreeRoot().findLayer(i).itemVisibilityChecked() for i in panel.grid_layers)
-panel._build()
-assert all(not project.layerTreeRoot().findLayer(i).itemVisibilityChecked() for i in panel.grid_layers)
+assert panel.grid_layers == old_ids
+assert all(project.mapLayer(i) is not None for i in old_ids)
+assert not grid_group.itemVisibilityChecked()
+assert all(not project.layerTreeRoot().findLayer(i).isVisible() for i in old_ids)
+panel.select_none()
 panel.show_frames.setChecked(True)
-assert all(project.layerTreeRoot().findLayer(i).itemVisibilityChecked() for i in panel.grid_layers)
+assert panel.grid_layers == old_ids
+assert project.mapLayer(panel.core_layer_id).selectedFeatureCount() == 0
+panel.select_all()
+assert {tile.name for tile in panel.selected_tiles()} == selected_names
+panel.show_frames.setChecked(False)
+panel._build()
+assert len(panel.grid_layers) == 2
+assert not grid_group.itemVisibilityChecked()
+assert [g.name() for g in root_group.children()] == ['Generated Tiles', 'Tile Grid', 'Input Layers']
+panel.show_frames.setChecked(True)
+assert project.mapLayer(panel.core_layer_id).selectedFeatureCount() == len(panel.selected_tiles())
+assert all(project.layerTreeRoot().findLayer(i).isVisible() for i in panel.grid_layers)
 panel.show_overlap.setChecked(False)
-assert project.layerTreeRoot().findLayer(panel.grid_layers[0]).itemVisibilityChecked()
-assert not project.layerTreeRoot().findLayer(panel.grid_layers[1]).itemVisibilityChecked()
+assert project.layerTreeRoot().findLayer(panel.grid_layers[0]).isVisible()
+assert not project.layerTreeRoot().findLayer(panel.grid_layers[1]).isVisible()
 # Collapsible headers retain clickable help, even when closed.
 assert panel.advanced_page.help.isVisible()
 QTest.mouseClick(panel.source_page.help, Qt.LeftButton)
@@ -169,6 +190,42 @@ assert not panel._busy and panel.generator.cancelled
 assert not panel.stop_button.isVisible()
 assert json.loads(manifest.read_text())['state'] == 'cancelled'
 assert panel.provider_page.isCollapsed() and panel.advanced_page.isCollapsed()
+# A new area owns a fresh group, even for the same extent. Old results survive.
+first_group_name = panel.run_group
+first_group = project.layerTreeRoot().findGroup(first_group_name)
+first_grid_ids = list(panel.grid_layers)
+tile = panel.selected_tiles()[0]
+image = QImage(panel.plan['pixels'], panel.plan['pixels'], QImage.Format_ARGB32)
+image.fill(QColor('blue'))
+response_path = temporary_output / 'synthetic-result.png'
+assert image.save(str(response_path))
+panel._store_result(tile, panel._generation_records[tile.name], str(response_path), 'offline_test')
+first_result_id = first_group.findGroup('Generated Tiles').findLayers()[0].layerId()
+first_input = panel._add_raster(project.mapLayer(first_result_id).source(), 'Synthetic input',
+                                first_group.findGroup('Input Layers'), False)
+first_ids = first_grid_ids + [first_result_id, first_input.id()]
+first_sources = {i: project.mapLayer(i).source() for i in first_ids}
+panel.seam_sources[tile.name] = {'previous_run': True}
+panel.capture_area()
+second_group_name = panel.run_group
+assert second_group_name != first_group_name
+second_group = project.layerTreeRoot().findGroup(second_group_name)
+assert not second_group.findGroup('Generated Tiles').findLayers()
+assert not second_group.findGroup('Input Layers').findLayers()
+assert len(second_group.findGroup('Tile Grid').findLayers()) == 2
+assert not panel.seam_sources and not panel.exported and not panel.generated
+assert {i: project.mapLayer(i).source() for i in first_ids} == first_sources
+panel.generate_selected()
+assert panel._busy and panel.run_group == second_group_name
+panel._store_result(tile, panel._generation_records[tile.name], str(response_path), 'offline_test')
+assert len(second_group.findGroup('Generated Tiles').findLayers()) == 1
+assert first_group.findGroup('Generated Tiles').findLayers()[0].layerId() == first_result_id
+assert {i: project.mapLayer(i).source() for i in first_ids} == first_sources
+QTest.mouseClick(panel.stop_button, Qt.LeftButton)
+panel.more_tiles.click()
+assert panel.run_group == second_group_name
+assert len(second_group.findGroup('Generated Tiles').findLayers()) == 1
+assert all(project.mapLayer(i) is not None for i in first_ids)
 # The saved-key path launches with an authcfg only and still exports no secrets.
 # This check is run with a disposable profile/auth database by the documented runner.
 auth = QgsApplication.authManager()
@@ -202,7 +259,7 @@ app.processEvents()
 assert panel.provider_page.help.isVisible()
 assert panel.advanced_page.help.isVisible()
 panel.grab().save('/private/tmp/mapstyle-ui-preview.png')
-print('PASS: English overview, area modes, aligned fitting buttons, click selection, overlays, help, collapsible settings, temporary/custom storage, offline generation and cancellation; API requests: 0')
+print('PASS: English overview, area modes, aligned fitting buttons, click selection, overlays, help, collapsible settings, temporary/custom storage, separate area groups with preserved results/inputs/grids, offline generation and cancellation; API requests: 0')
 panel.shutdown()
 project.clear()
 shutil.rmtree(temporary_output)
