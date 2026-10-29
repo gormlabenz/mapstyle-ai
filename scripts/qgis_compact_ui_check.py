@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Gorm Labenz
+
 """Offline interaction checks for the English overview, with zero provider calls."""
 import json
 import os

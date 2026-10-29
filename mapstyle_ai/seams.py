@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Gorm Labenz
+
 """Pure dependency and pixel geometry for north/left tile continuation."""
 import math
 

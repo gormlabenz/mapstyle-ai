@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Gorm Labenz
+
 """Local-only integration test. Run setup, then verify on a later QGIS event-loop turn.
 
 Expects MAPSTYLE_REPO and a running scripts/mock_image_api.py. Uses a separate hidden

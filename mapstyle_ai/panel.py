@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Gorm Labenz
+
 """Native QGIS dock for live, neighbor-conditioned map generation."""
 from datetime import datetime
 from pathlib import Path
@@ -29,7 +32,7 @@ from .seam_run import SeamlessRun
 from .seams import dependencies, continuation_prompt
 from .prompts import PROMPT_VERSION, build_prompt, validate_style
 from .live_export import copy_regions, blend_regions
-from .providers import GOOGLE, OPENAI, MODELS, validate_options, validate_image_count, safe_error
+from .providers import GOOGLE, OPENAI, MODELS, CAPABILITIES, compatible_size, resolve_options, validate_image_count, safe_error
 from .credentials import AuthenticationUnavailable, CredentialStore
 
 
@@ -174,6 +177,7 @@ class BackgroundPanel(QDockWidget):
         self.seam_sources = {}
         self.generation_manifest = None
         self._models = {}
+        self._overrides = {}
         self.last_directory = None
         self._temporary_output = None
         self.run_group = None
@@ -216,6 +220,7 @@ class BackgroundPanel(QDockWidget):
         scroll.setWidget(root)
         self.setWidget(scroll)
         self._area_visibility()
+        self._model_changed()
 
     def _section(self, title, explanation, collapsed=False, parent_layout=None, refresh=None):
         section = HelpSection(title, explanation, refresh=refresh)
@@ -334,9 +339,9 @@ class BackgroundPanel(QDockWidget):
         self.provider = QComboBox()
         self.provider.addItems([GOOGLE, OPENAI])
         form.addRow('Provider', self.provider)
-        self.model = QLineEdit(MODELS[GOOGLE][0])
-        self.model.setToolTip('Other models: ' + ', '.join(MODELS[GOOGLE][1:]))
-        form.addRow(field_label('Model ID', 'Enter an image model available to your API account.'), self.model)
+        self.model = QComboBox()
+        self.model.addItems(MODELS[GOOGLE])
+        form.addRow(field_label('Model', 'Maintained image model profiles. Use Advanced settings for custom IDs.'), self.model)
         self.quality = QComboBox()
         self.quality.addItems(['auto', 'low', 'medium', 'high'])
         self.quality.setEnabled(False)
@@ -366,7 +371,7 @@ class BackgroundPanel(QDockWidget):
         provider_layout.addLayout(form)
         form = FieldForm()
         self.pixels = QComboBox()
-        for size in (1024, 2048):
+        for size in CAPABILITIES[GOOGLE][MODELS[GOOGLE][0]].sizes:
             self.pixels.addItem(f'{size} × {size} px', size)
         form.addRow(field_label('Generated Tile Size',
             'Full generated image size in pixels, including context on all sides. '
@@ -409,7 +414,7 @@ class BackgroundPanel(QDockWidget):
             field.textChanged.connect(self._credentials_changed)
         self.provider_page.collapsedStateChanged.connect(self._credentials_changed)
         self._credentials_changed()
-        self.model.textChanged.connect(self._update_generate)
+        self.model.currentTextChanged.connect(self._model_changed)
         self.prompt.textChanged.connect(self._update_generate)
 
     def _advanced_section(self):
@@ -417,6 +422,19 @@ class BackgroundPanel(QDockWidget):
             'Edge handling and context affect rendering and continuity. '
             'Geographic tile size remains independent of image resolution.', collapsed=True)
         form = FieldForm()
+        self.model_override = QLineEdit()
+        self.model_override.setPlaceholderText('Use selected model')
+        form.addRow(field_label('Override model ID',
+            'Optional custom model on the same provider/API. Unknown models require an explicit tile size.'), self.model_override)
+        self.size_override = QLineEdit()
+        self.size_override.setPlaceholderText('Use model size selection')
+        form.addRow(field_label('Override tile size (px)',
+            'Square side length in pixels. Known model limits still apply. Gemini: 512/1024/2048/4096; '
+            'OpenAI: multiples of 16. Unknown model support is checked by the provider. No resizing.'), self.size_override)
+        self.capability_status = text_label('')
+        form.addRow('', self.capability_status)
+        self.model_override.textChanged.connect(self._model_changed)
+        self.size_override.textChanged.connect(self._model_changed)
         self.border = QComboBox()
         self.border.addItems(['Cover entire area', 'Only fully contained tiles'])
         form.addRow(field_label('Edge tiles', 'Cover the entire area with full-size tiles, or include only tiles entirely inside the area.'), self.border)
@@ -672,7 +690,7 @@ class BackgroundPanel(QDockWidget):
         bounds, crs = (rect_tuple(extent), crs) if new_area else self._grid_area
         settings.setDestinationCrs(crs)
         settings.setOutputDpi(96)
-        pixels = self.pixels.currentData()
+        _, pixels = self._effective_options()
         halo = self.halo.value()
         side = self._fitted_size or self.tile_size.value() * self.tile_unit.currentData()
         origin = (bounds[0], bounds[3]) if self._fitted_size else (0, 0)
@@ -906,13 +924,59 @@ class BackgroundPanel(QDockWidget):
         self._update_generate()
 
     def _provider_changed(self, provider):
-        self._provider_before_switch = self._provider
+        previous = self._provider
+        self._models[previous] = self.model.currentText()
+        self._overrides[previous] = (self.model_override.text(), self.size_override.text())
         self._provider = provider
-        self._models[self._provider_before_switch] = self.model.text()
-        self.model.setText(self._models.get(provider, MODELS[provider][0]))
-        self.model.setToolTip('Other models: ' + ', '.join(MODELS[provider][1:]))
+        self.model.blockSignals(True)
+        self.model.clear()
+        self.model.addItems(MODELS[provider])
+        self.model.setCurrentText(self._models.get(provider, MODELS[provider][0]))
+        self.model.blockSignals(False)
+        for field, value in zip((self.model_override, self.size_override), self._overrides.get(provider, ('', ''))):
+            field.blockSignals(True)
+            field.setText(value)
+            field.blockSignals(False)
         self.quality.setEnabled(provider == OPENAI)
+        self._model_changed()
         self._credentials_changed()
+
+    def _effective_options(self):
+        return resolve_options(self._provider, self.model.currentText(), self.pixels.currentData(),
+                               self.model_override.text(), self.size_override.text())
+
+    def _model_changed(self, *args):
+        if not hasattr(self, 'size_override'):
+            return
+        previous = self.pixels.currentData()
+        model = self.model_override.text().strip() or self.model.currentText()
+        capability = CAPABILITIES[self._provider].get(model)
+        sizes = capability.sizes if capability else ()
+        self.pixels.blockSignals(True)
+        self.pixels.clear()
+        for size in sizes:
+            suffix = ' (experimental)' if self._provider == OPENAI and size * size > 2560 * 1440 else ''
+            self.pixels.addItem(f'{size} × {size} px{suffix}', size)
+        if capability:
+            self.pixels.setCurrentIndex(self.pixels.findData(compatible_size(self._provider, model, previous)))
+        self.pixels.setEnabled(bool(capability) and not self.size_override.text().strip())
+        self.pixels.blockSignals(False)
+        try:
+            _, pixels = self._effective_options()
+            message = ('Custom model: native size support is unverified; the provider may reject this request.'
+                       if not capability else 'Sizes use maintained model profiles; account access is checked by the provider.')
+            message = f'Using {model} · {pixels} × {pixels} px. ' + message
+            if self._provider == OPENAI and pixels * pixels > 2560 * 1440:
+                message += ' This resolution is experimental in the OpenAI API.'
+            if previous is not None and previous != self.pixels.currentData() and not self.size_override.text().strip():
+                message += f' Tile size reset to {pixels} px for compatibility.'
+            if self.plan and self.plan['pixels'] != pixels:
+                self._grid_changed()
+        except ValueError as error:
+            message = str(error)
+        self.capability_status.setText(message)
+        self.pixels.setToolTip(message)
+        self._update_generate()
 
     def _show_keys(self, visible):
         for field in self.key_inputs.values():
@@ -976,6 +1040,9 @@ class BackgroundPanel(QDockWidget):
         self.stop_button.setVisible(busy)
         self.table.setEnabled(not busy)
         self.provider_page.setEnabled(not busy)
+        self.pixels.setEnabled(not busy and not self.size_override.text().strip()
+                               and bool(CAPABILITIES[self._provider].get(
+                                   self.model_override.text().strip() or self.model.currentText())))
         self._credentials_changed()
         self.reference_list.setEnabled(not busy)
         self.reference_button.setEnabled(not busy)
@@ -1019,11 +1086,16 @@ class BackgroundPanel(QDockWidget):
         dialog.exec_()
 
     def _update_generate(self, *args):
-        if not hasattr(self, 'generate_button'):
+        if not hasattr(self, 'generate_button') or not hasattr(self, 'size_override'):
             return
         ready = (self.plan and not self.plan['dirty'] and self.selected_tiles()
-                 and (self.key_inputs[self._provider].text().strip() or self.credentials.config_id(self._provider)) and self.model.text().strip()
+                 and (self.key_inputs[self._provider].text().strip() or self.credentials.config_id(self._provider)) and self.model.currentText().strip()
                  and (self.references or self.prompt.toPlainText().strip()))
+        try:
+            _, pixels = self._effective_options()
+            ready = ready and self.plan['pixels'] == pixels
+        except ValueError:
+            ready = False
         self.generate_button.setEnabled(bool(ready) and not self._busy)
         self.generate_button.setToolTip('Generate selected tiles' if ready else 'Set an area, select tiles, then add an API key and reference images or your instructions.')
 
@@ -1034,8 +1106,10 @@ class BackgroundPanel(QDockWidget):
             tiles = self.selected_tiles()
             if not self.plan or self.plan['dirty'] or not tiles:
                 raise ValueError('Update the grid and select tiles first.')
-            provider, model = self.provider.currentText(), self.model.text().strip()
-            validate_options(provider, model, self.plan['pixels'])
+            provider = self.provider.currentText()
+            model, pixels = self._effective_options()
+            if pixels != self.plan['pixels']:
+                raise ValueError('Update the grid for the selected output size first.')
             key, authcfg = self.credentials.resolve(provider, self.key_inputs[provider].text())
             validate_style(self.prompt.toPlainText(), [reference['id'] for reference in self.references])
             references = [image_png(reference['path']) for reference in self.references]

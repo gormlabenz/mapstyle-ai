@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Gorm Labenz
+
 """Asynchronous QGIS rendering and local, georeferenced image export."""
 import json
 from pathlib import Path

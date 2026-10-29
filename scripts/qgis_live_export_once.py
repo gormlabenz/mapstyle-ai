@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Gorm Labenz
+
 """One local export only. Does not construct a generator or send API requests.
 
 Run inside QGIS with MAPSTYLE_REPO set. Creates synthetic neighbors in files,

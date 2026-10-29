@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Gorm Labenz
+
 import base64
 from email import policy
 from email.parser import BytesParser
@@ -6,7 +9,7 @@ import unittest
 
 from mapstyle_ai.providers import (
     GOOGLE, OPENAI, make_request, parse_response, safe_error, validate_options,
-    validate_key,
+    validate_key, CAPABILITIES, compatible_size, resolve_options,
 )
 
 
@@ -57,6 +60,55 @@ class ProviderTests(unittest.TestCase):
                 images = [base64.b64decode(part['inlineData']['data'])
                           for part in json.loads(body)['contents'][0]['parts'][1:]]
             self.assertEqual(images, [b'SOURCE', b'STYLE', b'TOP', b'LEFT'])
+
+    def test_profiles_and_compatible_size_reset(self):
+        for provider, models in CAPABILITIES.items():
+            for model, capability in models.items():
+                for size in capability.sizes:
+                    validate_options(provider, model, size)
+                    self.assertEqual(compatible_size(provider, model, size), size)
+                self.assertEqual(compatible_size(provider, model, 123), 1024)
+        self.assertEqual(compatible_size(GOOGLE, 'gemini-2.5-flash-image', 4096), 1024)
+        self.assertEqual(compatible_size(OPENAI, 'gpt-image-2', 4096), 1024)
+
+    def test_overrides_require_explicit_unknown_size(self):
+        for provider in (GOOGLE, OPENAI):
+            selected = next(iter(CAPABILITIES[provider]))
+            self.assertEqual(resolve_options(provider, selected, 1024), (selected, 1024))
+            with self.assertRaisesRegex(ValueError, 'both'):
+                resolve_options(provider, selected, 1024, 'future-image')
+            self.assertEqual(resolve_options(provider, selected, 1024, 'future-image', '2048'),
+                             ('future-image', 2048))
+            for size in ('2K', '2048x2048', '1.5', '-1', '8193', '0', '1024.0'):
+                with self.assertRaises(ValueError):
+                    resolve_options(provider, selected, 1024, 'future-image', size)
+        with self.assertRaises(ValueError):
+            resolve_options(GOOGLE, 'gemini-2.5-flash-image', 1024, '', '2048')
+        with self.assertRaises(ValueError):
+            resolve_options(GOOGLE, 'gemini-nano-banana-2.1', 1024, '', '512')
+
+    def test_openai_custom_square_limits_and_exact_request(self):
+        for size in (1000, 800, 2896, 4096):
+            with self.assertRaises(ValueError):
+                validate_options(OPENAI, 'gpt-image-2', size)
+        for size in (1024.0, True, None, '1024'):
+            with self.assertRaises(ValueError):
+                validate_options(OPENAI, 'gpt-image-2', size)
+        model, size = resolve_options(OPENAI, 'gpt-image-2', 1024, '', '1536')
+        _, _, body = make_request(OPENAI, model, 'dummy', 'Prompt', size, b'a', b'b')
+        self.assertIn(b'1536x1536', body)
+
+    def test_google_all_native_tokens_and_unknown_wire_format(self):
+        for size, token in ((512, '512'), (1024, '1K'), (2048, '2K'), (4096, '4K')):
+            for model in ('gemini-3.1-flash-image', 'future-image'):
+                _, _, body = make_request(GOOGLE, model, 'dummy', 'Prompt', size, b'a', b'b')
+                config = json.loads(body)['generationConfig']['imageConfig']
+                self.assertEqual(config, {'aspectRatio': '1:1', 'imageSize': token})
+        with self.assertRaises(ValueError):
+            make_request(GOOGLE, 'future-image', 'dummy', 'Prompt', 1536, b'a', b'b')
+        # A future model that resembles an old ID must not inherit its capability.
+        _, _, body = make_request(GOOGLE, 'gemini-2.5-future', 'dummy', 'Prompt', 2048, b'a', b'b')
+        self.assertEqual(json.loads(body)['generationConfig']['imageConfig']['imageSize'], '2K')
 
     def test_parse_openai_base64(self):
         self.assertEqual(parse_response(OPENAI, json.dumps({'data': [{'b64_json': 'aW1hZ2U='}]})), b'image')

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Gorm Labenz
+
 """Offline QGIS integration for numbered references and all input modes; no HTTP."""
 import base64
 from email import policy
@@ -6,6 +9,10 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import os
+auth_directory = tempfile.TemporaryDirectory()
+os.environ['QGIS_AUTH_DB_DIR_PATH'] = auth_directory.name
+os.environ['QGIS_CUSTOM_CONFIG_PATH'] = auth_directory.name
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qgis.core import QgsApplication, QgsProject, QgsCoordinateReferenceSystem, QgsVectorLayer, QgsFeature, QgsGeometry, QgsRectangle
 from qgis.gui import QgsMapCanvas

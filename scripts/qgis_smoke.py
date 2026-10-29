@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Gorm Labenz
+
 """Execute in the live QGIS process via MCP. Never clears or saves the project.
 
 Creates clearly named synthetic local data; leaves the demo available for testing.

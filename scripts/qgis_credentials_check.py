@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Gorm Labenz
+
 """Isolated QGIS credential, restart, UI and request checks; zero provider calls.
 
 Run with QGIS' bundled Python. The parent creates a disposable profile before

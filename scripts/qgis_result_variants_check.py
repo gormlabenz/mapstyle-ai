@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Gorm Labenz
+
 """Offline QGIS check of all result variants, using synthetic pixels only."""
 import json
 from pathlib import Path

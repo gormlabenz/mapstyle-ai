@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Gorm Labenz
+
 """Render one current tile, including full generated neighbors, without API calls."""
 from pathlib import Path
 

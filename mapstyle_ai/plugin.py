@@ -1,4 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Gorm Labenz
+
+from pathlib import Path
+
 from qgis.PyQt.QtCore import Qt
+from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
 
 
@@ -9,7 +15,8 @@ class MapStyleAIPlugin:
         self.dock = None
 
     def initGui(self):
-        self.action = QAction('MapStyle AI', self.iface.mainWindow())
+        self.action = QAction(QIcon(str(Path(__file__).with_name('icon.png'))),
+                              'MapStyle AI', self.iface.mainWindow())
         self.action.setObjectName('MapStyleAIAction')
         self.action.triggered.connect(self.show)
         self.iface.addPluginToMenu('&MapStyle AI', self.action)

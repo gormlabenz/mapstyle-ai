@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Gorm Labenz
+
 """Internal map instructions and explicit image roles, independent of QGIS."""
 import re
 

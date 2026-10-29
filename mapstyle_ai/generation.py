@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Gorm Labenz
+
 """Bounded async HTTP queue on QGIS' event loop. No worker touches project layers."""
 from pathlib import Path
 import time

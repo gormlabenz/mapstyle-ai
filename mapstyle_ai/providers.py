@@ -1,31 +1,83 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Gorm Labenz
+
 """Provider wire formats. No QGIS, filesystem, credentials storage or HTTP client."""
 import base64
 import binascii
 import json
 import re
 import uuid
+from dataclasses import dataclass
 
 OPENAI = 'OpenAI · GPT Image'
 GOOGLE = 'Google Gemini · Nano Banana'
-MODELS = {
-    OPENAI: ['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare', 'gpt-image-2'],
-    GOOGLE: ['gemini-nano-banana-2.1', 'gemini-3-pro-image', 'gemini-3.1-flash-image'],
+# Square output only. Reviewed 2026-10-29 against:
+# https://developers.openai.com/api/docs/guides/image-generation
+# https://developers.openai.com/api/reference/resources/images/methods/edit
+# https://ai.google.dev/gemini-api/docs/generate-content/image-generation
+@dataclass(frozen=True)
+class Capability:
+    sizes: tuple
+    default: int = 1024
+    size_parameter: bool = True
+    custom_square: bool = False
+
+
+CAPABILITIES = {
+    OPENAI: {
+        model: Capability((1024, 2048), custom_square=True)
+        for model in ('gpt-image-2.5-sunburst', 'gpt-image-2.5-flare', 'gpt-image-2',
+                      'gpt-image-2.5-sunburst-2026-09-08',
+                      'gpt-image-2.5-flare-2026-09-08', 'gpt-image-2-2026-04-21')
+    },
+    GOOGLE: {
+        'gemini-nano-banana-2.1': Capability((1024, 2048, 4096)),
+        'gemini-3-pro-image': Capability((1024, 2048, 4096)),
+        'gemini-3.1-flash-image': Capability((512, 1024, 2048, 4096)),
+        'gemini-2.5-flash-image': Capability((1024,), size_parameter=False),
+    },
 }
+MODELS = {provider: list(models) for provider, models in CAPABILITIES.items()}
+GOOGLE_SIZES = {512: '512', 1024: '1K', 2048: '2K', 4096: '4K'}
 OPENAI_URL = 'https://api.openai.com/v1/images/edits'
 GOOGLE_URL = 'https://generativelanguage.googleapis.com/v1/models/{model}:generateContent'
 
 
 def validate_options(provider, model, pixels):
-    if provider not in MODELS:
+    if provider not in CAPABILITIES:
         raise ValueError('Unknown image provider.')
-    if not re.fullmatch(r'[A-Za-z0-9._-]+', model):
-        raise ValueError('Enter a valid model ID without a URL or spaces.')
-    if pixels not in (1024, 2048):
-        raise ValueError('Generation requires 1024 or 2048 pixels.')
-    if model.startswith('gemini-2.5-') and pixels != 1024:
-        raise ValueError('Gemini 2.5 Flash Image supports only 1024-pixel tiles here.')
-    if model.startswith(('gpt-image-1', 'dall-e')) and pixels != 1024:
-        raise ValueError('Choose a current GPT Image model for 2048-pixel tiles.')
+    if not isinstance(model, str) or not re.fullmatch(r'[A-Za-z0-9._-]{1,200}', model):
+        raise ValueError('Enter a valid model ID without a URL or spaces (maximum 200 characters).')
+    if type(pixels) is not int or not 256 <= pixels <= 8192:
+        raise ValueError('Tile size must be a whole number between 256 and 8192 pixels.')
+    capability = CAPABILITIES[provider].get(model)
+    if capability and not capability.custom_square and pixels not in capability.sizes:
+        raise ValueError(f'{model} supports square tiles of {capability.sizes} pixels only.')
+    if provider == GOOGLE and pixels not in GOOGLE_SIZES:
+        raise ValueError('The Gemini imageSize API supports square sizes 512, 1024, 2048 or 4096 here.')
+    if provider == OPENAI:
+        if pixels % 16:
+            raise ValueError('OpenAI tile size must be a multiple of 16 pixels.')
+        if capability and (pixels > 3840 or not 655360 <= pixels * pixels <= 8294400):
+            raise ValueError('This OpenAI model requires 655360–8294400 pixels total and edges at most 3840 px.')
+
+
+def compatible_size(provider, model, current):
+    capability = CAPABILITIES[provider][model]
+    return current if current in capability.sizes else capability.default
+
+
+def resolve_options(provider, selected_model, selected_pixels, model_override='', size_override=''):
+    """Unknown models need an explicit size; never inherit native capabilities."""
+    model = model_override.strip() or selected_model
+    raw_size = size_override.strip()
+    if raw_size and not re.fullmatch(r'[0-9]{1,5}', raw_size):
+        raise ValueError('Tile size override must be a whole pixel count, for example 2048.')
+    if model not in CAPABILITIES.get(provider, {}) and not (model_override.strip() and raw_size):
+        raise ValueError('Unknown models require both a model ID override and an explicit tile size override.')
+    pixels = int(raw_size) if raw_size else selected_pixels
+    validate_options(provider, model, pixels)
+    return model, pixels
 
 
 def validate_key(key):
@@ -86,8 +138,9 @@ def make_request(provider, model, key, prompt, pixels, source, references, quali
             headers['Authorization'] = 'Bearer ' + key
         return OPENAI_URL, headers, bytes(body)
     config = {'aspectRatio': '1:1'}
-    if not model.startswith('gemini-2.5-'):
-        config['imageSize'] = '1K' if pixels == 1024 else '2K'
+    capability = CAPABILITIES[GOOGLE].get(model)
+    if capability is None or capability.size_parameter:
+        config['imageSize'] = GOOGLE_SIZES[pixels]
     parts = [{'text': prompt}]
     for png in (source, *references, *neighbors):
         parts.append({'inlineData': {'mimeType': 'image/png', 'data': base64.b64encode(png).decode('ascii')}})

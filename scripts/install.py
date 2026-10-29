@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Gorm Labenz
+
 """Link this checkout into an existing QGIS profile; never replaces a directory."""
 import argparse
 from pathlib import Path

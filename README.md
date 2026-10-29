@@ -2,6 +2,16 @@
 
 A QGIS plugin for illustrated, georeferenced map backgrounds from existing map layers, style references and/or a style description. Uses QGIS, Qt and GDAL without additional Python packages.
 
+## Install and start
+
+Download [MapStyle AI 0.6.1](https://github.com/gormlabenz/mapstyle-ai/releases/tag/v0.6.1), then use **Plugins → Manage and Install Plugins → Install from ZIP** in QGIS 3.44 or later (QGIS 3 series). Enable MapStyle AI and open it from the Plugins menu or toolbar. This is an **experimental** release; QGIS repository approval is pending.
+
+Choose input layers and an area, select a tile size, enter your own provider API key, add a style reference and/or description, choose an output folder, and generate selected tiles. See the [quick-start guide](mapstyle_ai/README.md), [changelog](CHANGELOG.md) and [release procedure](docs/releasing.md).
+
+**Data and costs:** generation sends rendered maps, reference images, neighboring results and prompts to your selected OpenAI or Google Gemini API. API access is separately billed; chat subscriptions do not include it. Only share data you are authorized to send. Generated features can move or change: results are illustrations and unsuitable for measurement or navigation. There is no plugin-operated server or telemetry. See the [data handling details](mapstyle_ai/README.md#data-and-costs).
+
+**License:** Copyright (C) 2026 Gorm Labenz. [GNU GPL v2 or later](LICENSE), without warranty. Provider services and generated-image rights have their own terms. Contact: gorm@labenz.io. Report problems through [GitHub Issues](https://github.com/gormlabenz/mapstyle-ai/issues).
+
 ## Interface
 
 One scrollable English overview replaces the tabs. Input layers, Area and tiles, and Generation start open; Tiles, **Provider settings**, **Advanced settings** and **Log** start collapsed. Question marks provide hover hints and clickable help, including in collapsed headers. Form fields use separate label, input and fixed-width help columns, with all help icons on the right. The input-layer header also contains an icon to refresh project layers.
@@ -61,7 +71,11 @@ There are no automatic paid retries. Authentication, quota and rate-limit errors
 
 ## Providers
 
-Google Gemini and OpenAI image editing are supported. Model IDs are editable and availability depends on the API account. Web subscriptions do not replace API billing. Official HTTPS endpoints use QGIS networking with manual redirects; TLS checks remain enabled. OpenAI quality is selectable. Requests contain the map input, all selected style references, neighbor images where applicable and the prompt.
+Google Gemini and OpenAI image editing are supported. Models are selected from maintained profiles in `providers.py` (reviewed 2026-10-29). Generated Tile Size lists square native outputs for the effective model: Gemini Nano Banana 2.1/3 Pro: 1024/2048/4096; 3.1 Flash: additionally 512; 2.5 Flash: 1024 only. OpenAI GPT Image 2/2.5 profiles offer 1024 and 2048; 2048 is marked experimental per the API documentation. OpenAI also accepts custom square dimensions within documented pixel/edge limits via the override. Switching provider/model retains compatible sizes and resets incompatible selections to 1024. Size changes rebuild the grid before generation; the context margin must remain less than half the full size.
+
+Advanced settings provides optional **Override model ID** and **Override tile size (px)** fields, remembered separately per provider during the session. Unknown models require both fields; their native output support is unverified. The local override range is 256–8192 pixels per side. Overrides use the existing provider endpoint and wire format, not arbitrary APIs: Gemini sizes map exactly to `512`/`1K`/`2K`/`4K`, and OpenAI sends `NxN` without rounding. Known model restrictions cannot be bypassed. Unknown models requiring new size tokens or API parameters need a plugin update. No capability lookup, automatic scaling or fallback request occurs. Returned dimensions must match exactly; mismatches keep the original image and fail the tile. Reloading preserves overrides and migrates legacy custom IDs. Other UI settings remain session-only; encrypted API-key handling is unchanged.
+
+Model availability depends on the API account. Web subscriptions do not replace API billing. Official HTTPS endpoints use QGIS networking with manual redirects; TLS checks remain enabled. OpenAI quality is selectable. Requests contain the map input, all selected style references, neighbor images where applicable and the prompt.
 
 ## Development and installation
 
@@ -86,6 +100,7 @@ Offline QGIS checks on this Mac:
 QT_QPA_PLATFORM=offscreen /Applications/QGIS.app/Contents/MacOS/python scripts/qgis_metric_grid_check.py
 QT_QPA_PLATFORM=offscreen /Applications/QGIS.app/Contents/MacOS/python scripts/qgis_compact_ui_check.py
 QT_QPA_PLATFORM=offscreen /Applications/QGIS.app/Contents/MacOS/python scripts/qgis_reference_check.py
+QT_QPA_PLATFORM=offscreen /Applications/QGIS.app/Contents/MacOS/python scripts/qgis_capabilities_check.py
 QT_QPA_PLATFORM=offscreen /Applications/QGIS.app/Contents/MacOS/python scripts/qgis_result_variants_check.py
 ```
 
@@ -95,7 +110,7 @@ To reload an idle plugin in the QGIS console while retaining selections and cred
 
 ```python
 from pathlib import Path
-MAPSTYLE_REPO = '/Users/gormlabenz/Documents/labenz-io/000_Repositorys/mapstyle-ai'
+MAPSTYLE_REPO = '/absolute/path/to/mapstyle-ai'
 exec((Path(MAPSTYLE_REPO) / 'scripts/reload_preserve.py').read_text())
 ```
 

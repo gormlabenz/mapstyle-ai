@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Gorm Labenz
+
 """Reload an idle plugin, preserving selections and credentials in memory only.
 
 No rendering, provider calls or credentials written to disk.
@@ -15,7 +18,10 @@ state = None
 if old:
     from mapstyle_ai.seams import DEFAULT_PROMPT as old_default
     state = dict(
-        provider=old.provider.currentText(), model=old.model.text(), models=dict(old._models),
+        provider=old.provider.currentText(), model=old.model.currentText() if hasattr(old.model, 'currentText') else old.model.text(), models=dict(old._models),
+        overrides=dict(getattr(old, '_overrides', {})),
+        model_override=old.model_override.text() if hasattr(old, 'model_override') else '',
+        size_override=old.size_override.text() if hasattr(old, 'size_override') else '',
         keys={provider: field.text() for provider, field in old.key_inputs.items()} if hasattr(old, 'key_inputs') else dict(old._keys),
         references=([dict(reference) for reference in old.references] if hasattr(old, 'references')
                     else ([dict(id=1, path=old.reference.text())] if old.reference.text().strip() else [])),
@@ -48,7 +54,14 @@ new = qgis.utils.plugins['mapstyle_ai'].dock
 if state:
     new.provider.setCurrentText(state['provider'])
     new._models = state['models']
-    new.model.setText(state['model'])
+    new._overrides = state['overrides']
+    if new.model.findText(state['model']) >= 0:
+        new.model.setCurrentText(state['model'])
+    else:
+        state['model_override'] = state['model']
+        state['size_override'] = state['size_override'] or str(state['pixels'])
+    new.model_override.setText(state['model_override'])
+    new.size_override.setText(state['size_override'])
     for provider, field in new.key_inputs.items():
         field.setText(state['keys'].get(provider, ''))
     if state['prompt'] is not None:
@@ -61,7 +74,9 @@ if state:
     new.overlap_mode.setCurrentIndex(new.overlap_mode.findData(state['overlap_mode']))
     new.quality.setCurrentText(state['quality'])
     new.concurrent.setValue(state['concurrency'])
-    new.pixels.setCurrentIndex(new.pixels.findData(state['pixels']))
+    index = new.pixels.findData(state['pixels'])
+    if index >= 0:
+        new.pixels.setCurrentIndex(index)
     new.halo.setValue(state['halo'])
     new.tile_unit.setCurrentIndex(new.tile_unit.findData(state['tile_unit']))
     new.tile_size.setValue(state['tile_size'])
@@ -88,7 +103,11 @@ if state:
         new._grid_area = state['grid_area']
         new._fitted_size = state['fitted_size']
         new.plan.setdefault('fitted', False)
-        if 'tile_size_m' not in new.plan:
+        try:
+            compatible = new._effective_options()[1] == new.plan['pixels']
+        except ValueError:
+            compatible = False
+        if 'tile_size_m' not in new.plan or not compatible:
             new.plan['dirty'] = True
         new.tiles = state['tiles']
         new.seam_sources = state['seams']

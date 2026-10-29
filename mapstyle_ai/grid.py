@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Gorm Labenz
+
 """QGIS-independent, north-up tile geometry. All bounds use one map CRS."""
 from dataclasses import asdict, dataclass
 import math

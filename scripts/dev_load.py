@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Gorm Labenz
+
 """Run from the QGIS console after defining MAPSTYLE_REPO; see README."""
 from pathlib import Path
 import sys

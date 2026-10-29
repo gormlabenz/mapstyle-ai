@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Gorm Labenz
+
 """Provider credentials in QGIS' encrypted authentication storage.
 
 Only opaque authcfg references belong in QgsSettings. Saved secrets are expanded

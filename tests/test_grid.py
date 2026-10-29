@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Gorm Labenz
+
 import unittest
 
 from mapstyle_ai.grid import build_grid, column_name, crop_window, fitted_size
