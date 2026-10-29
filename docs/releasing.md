@@ -54,4 +54,6 @@ The GitHub workflow repeats unit tests and package validation on Linux. It does 
 - OSGeo confirmed that GitHub OAuth can be used for QGIS submission. The submission used the existing GitHub login; a separate OSGeo account was not needed.
 - Version 0.6.1 was successfully uploaded to QGIS with all security rules enabled: https://plugins.qgis.org/plugins/mapstyle_ai/ (plugin ID 6788).
 - The contact address `gorm@labenz.io` was confirmed through QGIS' confirmation email; the website displayed “Email Confirmed”. Confirmation tokens are not stored here.
-- Validation status: https://plugins.qgis.org/plugins/mapstyle_ai/version/0.6.1/#security-tab . At upload, security/quality validation was running. Manual approval is required before the plugin is publicly available through QGIS. The GitHub release remains available for manual installation.
+- Validation status: https://plugins.qgis.org/plugins/mapstyle_ai/version/0.6.1/#security-tab . The completed security/quality scan reports all five checks passed, zero warnings and zero critical issues.
+- The separate Qt6 check reports 53 compatibility findings, predominantly unscoped Qt enums. This release explicitly targets QGIS 3.44–3.99; QGIS 4/Qt6 compatibility is not claimed.
+- Version details show `Approved: no`, `Experimental: yes`, minimum QGIS 3.44.0 and maximum 3.99.0. Manual approval is still required before the plugin is publicly available through QGIS. The GitHub release remains available for manual installation.
