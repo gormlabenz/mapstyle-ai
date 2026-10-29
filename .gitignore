@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+dist/
+exports/
+test-output/
+.env
+.env.*
+!.env.example
+.venv/
+.pytest_cache/
+.coverage
+htmlcov/
+/local/
+/ahrensburg/
+/examples/mapstyle-ai-test/

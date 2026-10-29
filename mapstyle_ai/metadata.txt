@@ -1,0 +1,10 @@
+[general]
+name=MapStyle AI
+description=Grundlagen als überlappende Kacheln exportieren und KI-Kartenhintergründe vorbereiten.
+about=KI-Kartenhintergründe mit OpenAI und Google Gemini generieren. Überlappende Kacheln, parallele Aufträge, Georeferenzierung und Layerverwaltung.
+version=0.4.1
+qgisMinimumVersion=3.44
+author=Gorm Labenz
+email=
+category=Raster
+experimental=True
