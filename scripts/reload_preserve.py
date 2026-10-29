@@ -16,7 +16,7 @@ if old:
     from mapstyle_ai.seams import DEFAULT_PROMPT as old_default
     state = dict(
         provider=old.provider.currentText(), model=old.model.text(), models=dict(old._models),
-        keys=dict(old._keys),
+        keys={provider: field.text() for provider, field in old.key_inputs.items()} if hasattr(old, 'key_inputs') else dict(old._keys),
         references=([dict(reference) for reference in old.references] if hasattr(old, 'references')
                     else ([dict(id=1, path=old.reference.text())] if old.reference.text().strip() else [])),
         next_reference_id=getattr(old, '_next_reference_id', 1), output=old.output.text(),
@@ -40,15 +40,16 @@ if old:
     )
     state['next_reference_id'] = max(state['next_reference_id'],
                                      max((r['id'] for r in state['references']), default=0) + 1)
-    state['keys'][state['provider']] = old.key.text()
+    if not hasattr(old, 'key_inputs'):
+        state['keys'][state['provider']] = old.key.text()
 exec((Path(MAPSTYLE_REPO)/'scripts/dev_load.py').read_text())
 new = qgis.utils.plugins['mapstyle_ai'].dock
 if state:
     new.provider.setCurrentText(state['provider'])
     new._models = state['models']
     new.model.setText(state['model'])
-    new._keys = state['keys']
-    new.key.setText(state['keys'].get(state['provider'],''))
+    for provider, field in new.key_inputs.items():
+        field.setText(state['keys'].get(provider, ''))
     if state['prompt'] is not None:
         new.prompt.setPlainText(state['prompt'])
     new.references = state['references']
@@ -119,6 +120,6 @@ if state:
         new._selection_changed()
     new._update_fit_buttons()
     new._grid_timer.stop()
-    new._tell('MapStyle AI 0.6.0 ready. No image exports or API requests started.')
+    new._tell('MapStyle AI 0.6.1 ready. No image exports or API requests started.')
 state = None
 print('Interface updated. No image exports or API requests started.')

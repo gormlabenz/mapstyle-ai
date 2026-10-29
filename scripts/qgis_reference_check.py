@@ -50,7 +50,7 @@ assert len(panel.tiles) == 4, len(panel.tiles)
 assert panel.prompt.toPlainText() == ''
 assert 'Reference 1' in panel.prompt.placeholderText()
 assert not hasattr(panel, 'reset_prompt_button')
-panel.key.setText('offline-test-key')
+panel.key_inputs[panel._provider].setText('offline-test-key')
 assert not panel.generate_button.isEnabled()
 
 # Fake only the HTTP queue: real live exports, scheduling, image processing and manifests run.
@@ -60,7 +60,7 @@ class OfflineQueue(QObject):
     succeeded = pyqtSignal(str, str)
     failed = pyqtSignal(str, str)
     finished = pyqtSignal()
-    def __init__(self, jobs, provider, model, key, prompt, references, concurrency, quality, parent):
+    def __init__(self, jobs, provider, model, key, prompt, references, concurrency, quality, parent, authcfg=''):
         super().__init__(parent)
         self.jobs = jobs
         self.references = references
@@ -116,7 +116,7 @@ with tempfile.TemporaryDirectory(prefix='mapstyle-references-') as temp:
     for provider in (OPENAI, GOOGLE):
         for mode in ('images', 'mixed', 'text'):
             panel.provider.setCurrentText(provider)
-            panel.key.setText('offline-test-key')
+            panel.key_inputs[panel._provider].setText('offline-test-key')
             panel.references = ([] if mode == 'text' else
                                 [dict(id=1, path=paths[0]), dict(id=3, path=paths[2])])
             panel._reference_preview()
@@ -163,7 +163,7 @@ with tempfile.TemporaryDirectory(prefix='mapstyle-references-') as temp:
     panel.references = [dict(id=i, path=paths[0]) for i in range(1, 15)]
     panel._reference_preview()
     panel.provider.setCurrentText(OPENAI)
-    panel.key.setText('dummy')
+    panel.key_inputs[panel._provider].setText('dummy')
     panel._build()
     captured.clear()
     panel.generate_selected()
@@ -172,7 +172,7 @@ with tempfile.TemporaryDirectory(prefix='mapstyle-references-') as temp:
     panel.references = [dict(id=1, path=paths[0]), dict(id=3, path=paths[2])]
     panel._reference_preview()
     panel.prompt.setPlainText('Colors like Reference 1, linework like Reference 3.')
-    panel.key.clear()
+    panel.key_inputs[panel._provider].clear()
     app.processEvents()
     panel.grab().save('/private/tmp/mapstyle-references-preview.png')
     # Exercise state migration in an isolated runtime; only plugin construction is stubbed.

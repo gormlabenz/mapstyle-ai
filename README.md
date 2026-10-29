@@ -1,4 +1,4 @@
-# MapStyle AI · QGIS 3.44 · Version 0.6.0
+# MapStyle AI · QGIS 3.44 · Version 0.6.1
 
 A QGIS plugin for illustrated, georeferenced map backgrounds from existing map layers, style references and/or a style description. Uses QGIS, Qt and GDAL without additional Python packages.
 
@@ -10,10 +10,20 @@ One scrollable English overview replaces the tabs. Input layers, Area and tiles,
 2. **Area and tiles:** capture the **Current map view** with **Set area**, or select **Layer extent** to use a layer's bounding rectangle immediately. The area layer does not have to be an input layer. Set square tile size in m or km. The fitting buttons sit directly below the size input in the same form column.
 3. **Tiles:** all tiles start selected in green. Click to select or deselect; drag for a range. Running and completed tiles show status. **Show tile outlines on map** controls both core outlines and any enabled context overlay.
 4. **Save to:** empty means temporary storage. Optionally choose a folder for permanent generation files; the reset icon returns to temporary storage.
-5. **Generation:** expand provider settings to set provider, model, quality, API key and parallel jobs. Add one or more style references and/or describe the desired style in the initially empty optional instructions field, then generate selected tiles. The cancel button appears while running.
+5. **Generation:** expand provider settings to set provider, model, quality, separate OpenAI/Gemini API keys and parallel jobs. Use **Save API keys** to retain entered keys securely across restarts. Add one or more style references and/or describe the desired style in the initially empty optional instructions field, then generate selected tiles. The cancel button appears while running.
 6. **Advanced settings:** image pixels, edge treatment, context margin, crop-to-area, context overlay, optional live-input layers, input preview, manual result import and a collapsible activity log.
 
-Temporary images are real files in the system temporary directory because QGIS layers need backing files. They remain available across panel reloads but may be removed by the system later. Choose a permanent output folder to retain results for future projects. Keys stay in panel memory only and are excluded from all generation files and logs.
+Temporary images are real files in the system temporary directory because QGIS layers need backing files. They remain available across panel reloads but may be removed by the system later. Choose a permanent output folder to retain results for future projects. Unsaved keys stay in panel memory only. Saved keys use QGIS encrypted authentication storage; normal settings contain only their authentication configuration IDs. Keys are excluded from project files, generation files and plugin logs.
+
+## API keys and secure storage
+
+**Provider settings** always shows separate **OpenAI API key** and **Google Gemini API key** password fields. Enter either or both, then click **Save API keys**. Empty fields leave saved keys unchanged. Saving a replacement updates the same provider configuration. Each provider shows whether its key is saved or is an unsaved session entry; successful saves clear the input field. **Show keys** reveals only entered text, never stored credentials.
+
+An entered key takes precedence for this session. Without an entered key, generation uses that provider's saved QGIS configuration. Switching providers preserves both inputs independently. Closing the plugin clears session inputs and retains saved configurations. The Google field uses the existing Gemini API, not Vertex AI.
+
+QGIS handles master-password creation and unlocking through its standard dialog. The plugin does not create its own master password or change QGIS wallet settings. To avoid entering the master password after every restart, use QGIS' optional **Wallet/Keyring** integration in **Settings → Options → Authentication**. Otherwise QGIS can ask for the master password the first time saved credentials are used in a session. No password prompt is opened just by opening the panel.
+
+Saved entries are named **MapStyle AI - OpenAI** and **MapStyle AI - Google Gemini** and can be managed or removed in QGIS' Authentication settings. Cancelling unlocking or a missing configuration prevents requests using that saved key; there is no plaintext fallback. Details and verification: [QGIS credential integration](docs/credentials.md).
 
 ## Geographic grid
 
@@ -67,15 +77,16 @@ python3 scripts/package.py
 python3 -m unittest discover -s tests -v
 ```
 
-The install script refuses to overwrite an existing installation. The installable ZIP is `dist/mapstyle_ai-0.6.0.zip`.
+The install script refuses to overwrite an existing installation. The installable ZIP is `dist/mapstyle_ai-0.6.1.zip`.
 
 Offline QGIS checks on this Mac:
 
 ```sh
-QT_QPA_PLATFORM=offscreen PYTHONPATH=/Applications/QGIS.app/Contents/Resources/python /Applications/QGIS.app/Contents/MacOS/python scripts/qgis_metric_grid_check.py
-QT_QPA_PLATFORM=offscreen PYTHONPATH=/Applications/QGIS.app/Contents/Resources/python /Applications/QGIS.app/Contents/MacOS/python scripts/qgis_compact_ui_check.py
-QT_QPA_PLATFORM=offscreen PYTHONPATH=/Applications/QGIS.app/Contents/Resources/python /Applications/QGIS.app/Contents/MacOS/python scripts/qgis_reference_check.py
-QT_QPA_PLATFORM=offscreen PYTHONPATH=/Applications/QGIS.app/Contents/Resources/python /Applications/QGIS.app/Contents/MacOS/python scripts/qgis_result_variants_check.py
+/Applications/QGIS.app/Contents/MacOS/python scripts/qgis_credentials_check.py
+QT_QPA_PLATFORM=offscreen /Applications/QGIS.app/Contents/MacOS/python scripts/qgis_metric_grid_check.py
+QT_QPA_PLATFORM=offscreen /Applications/QGIS.app/Contents/MacOS/python scripts/qgis_compact_ui_check.py
+QT_QPA_PLATFORM=offscreen /Applications/QGIS.app/Contents/MacOS/python scripts/qgis_reference_check.py
+QT_QPA_PLATFORM=offscreen /Applications/QGIS.app/Contents/MacOS/python scripts/qgis_result_variants_check.py
 ```
 
 These isolated checks use synthetic data and make no provider calls. They cover metric geometry and export, actual overview interactions, area modes, fitting, selection, overlay visibility, help, collapsed defaults, temporary/custom output, simulated generation launch/cancel and all three transition modes. A real paid generation is left to the user. Legacy smoke scripts for the original workflow are not current verification paths.

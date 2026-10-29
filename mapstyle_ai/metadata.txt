@@ -2,7 +2,7 @@
 name=MapStyle AI
 description=Create illustrated map backgrounds from overlapping, georeferenced tiles.
 about=Generate AI map backgrounds with OpenAI and Google Gemini. Metric tile grids, seamless neighbor continuation and georeferenced results in a compact interface.
-version=0.6.0
+version=0.6.1
 qgisMinimumVersion=3.44
 author=Gorm Labenz
 email=

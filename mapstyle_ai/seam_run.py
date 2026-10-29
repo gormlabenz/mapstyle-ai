@@ -34,6 +34,7 @@ class SeamlessRun(QObject):
         self.max_active = 0
         self.prepared = {}
         self._key = self.options.pop('key')
+        self.authcfg = self.options.pop('authcfg', '')
 
     def start(self):
         self.active = True
@@ -84,7 +85,8 @@ class SeamlessRun(QObject):
         job = dict(id=name, input=prepared['png'], pixels=self.options['pixels'], prompt=prompt,
                    neighbors=neighbor_bytes, output=str(self.directory/'responses'/f'{name}.png'))
         queue = GenerationQueue([job], self.options['provider'], self.options['model'], self._key,
-                                prompt, self.options['references'], 1, self.options['quality'], parent=self)
+                                prompt, self.options['references'], 1, self.options['quality'], parent=self,
+                                authcfg=self.authcfg)
         self.running[name] = queue
         queue.started.connect(self.started)
         queue.succeeded.connect(self._succeeded)

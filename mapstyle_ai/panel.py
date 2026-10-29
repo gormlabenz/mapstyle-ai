@@ -11,7 +11,7 @@ from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDialog, QDockWidget,
     QDoubleSpinBox, QFileDialog, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMessageBox, QPlainTextEdit, QProgressBar,
-    QPushButton, QScrollArea, QSpinBox, QTableWidget, QToolButton, QWhatsThis,
+    QPushButton, QScrollArea, QSizePolicy, QSpinBox, QTableWidget, QToolButton, QWhatsThis,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qgis.core import (
@@ -30,6 +30,7 @@ from .seams import dependencies, continuation_prompt
 from .prompts import PROMPT_VERSION, build_prompt, validate_style
 from .live_export import copy_regions, blend_regions
 from .providers import GOOGLE, OPENAI, MODELS, validate_options, validate_image_count, safe_error
+from .credentials import AuthenticationUnavailable, CredentialStore
 
 
 OVERLAP_MODES = {
@@ -176,7 +177,7 @@ class BackgroundPanel(QDockWidget):
         self.last_directory = None
         self._temporary_output = None
         self.run_group = None
-        self._keys = {}
+        self.credentials = CredentialStore()
         self._provider = GOOGLE
         self._busy = False
         self._closed = False
@@ -202,7 +203,7 @@ class BackgroundPanel(QDockWidget):
             'Create illustrated, georeferenced map backgrounds from your QGIS layers. '
             'Choose input layers, set an area, select tiles and add style references or describe your desired style. '
             'Generation sends the selected map images, reference and prompt to your provider and uses paid API credits. '
-            'API keys stay in memory for this session. Generated results appear as QGIS layers.'))
+            'API keys can be saved securely in QGIS authentication storage. Generated results appear as QGIS layers.'))
         self.overview.addLayout(heading)
         self._sources_section()
         self._tiles_section()
@@ -324,8 +325,11 @@ class BackgroundPanel(QDockWidget):
             'Images and prompts are sent to the selected provider and charged to your API account. '
             'Results are georeferenced, but AI may still move or alter map details.')
         self.provider_page, provider_layout = self._section('Provider settings',
-            'These settings apply to all tiles. API keys are kept only in memory and are never saved in the project or generation files.',
+            'These settings apply to all tiles. Save API keys in QGIS encrypted authentication storage, '
+            'or enter keys for this session only. Keys are excluded from project and generation files. '
+            'QGIS may ask for its master password; its optional Wallet/Keyring integration can remember it.',
             collapsed=True, parent_layout=layout)
+        self.provider_page.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         form = FieldForm()
         self.provider = QComboBox()
         self.provider.addItems([GOOGLE, OPENAI])
@@ -337,11 +341,23 @@ class BackgroundPanel(QDockWidget):
         self.quality.addItems(['auto', 'low', 'medium', 'high'])
         self.quality.setEnabled(False)
         form.addRow(field_label('Quality', 'OpenAI image quality. Higher quality can increase generation time and cost.'), self.quality)
-        self.key = QLineEdit()
-        self.key.setEchoMode(QLineEdit.Password)
-        self.key.setPlaceholderText('API key · this session only')
-        form.addRow('API key', self.key)
-        self.show_key = QCheckBox('Show key')
+        self.key_inputs = {}
+        self.key_status = {}
+        for provider, label in ((OPENAI, 'OpenAI API key'), (GOOGLE, 'Google Gemini API key')):
+            field = QLineEdit()
+            field.setEchoMode(QLineEdit.Password)
+            field.setPlaceholderText('Enter a key to use or replace')
+            field.setAccessibleName(label)
+            self.key_inputs[provider] = field
+            self.key_status[provider] = QLabel()
+            self.key_status[provider].setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+            form.addRow(label, field)
+            form.addRow('', self.key_status[provider])
+        self.save_keys_button = button('Save API keys', self._save_keys)
+        self.save_keys_button.setToolTip('Save entered keys securely in QGIS. Empty fields keep existing saved keys.')
+        form.addRow('', self.save_keys_button)
+        self.show_key = QCheckBox('Show keys')
+        self.show_key.setToolTip('Show entered keys only. Saved keys are never loaded into these fields.')
         form.addRow('', self.show_key)
         self.concurrent = QSpinBox()
         self.concurrent.setRange(1, 16)
@@ -388,8 +404,11 @@ class BackgroundPanel(QDockWidget):
         self.stop_button.hide()
         layout.addWidget(self.stop_button)
         self.provider.currentTextChanged.connect(self._provider_changed)
-        self.show_key.toggled.connect(lambda visible: self.key.setEchoMode(QLineEdit.Normal if visible else QLineEdit.Password))
-        self.key.textChanged.connect(self._update_generate)
+        self.show_key.toggled.connect(self._show_keys)
+        for field in self.key_inputs.values():
+            field.textChanged.connect(self._credentials_changed)
+        self.provider_page.collapsedStateChanged.connect(self._credentials_changed)
+        self._credentials_changed()
         self.model.textChanged.connect(self._update_generate)
         self.prompt.textChanged.connect(self._update_generate)
 
@@ -856,13 +875,42 @@ class BackgroundPanel(QDockWidget):
 
     def _provider_changed(self, provider):
         self._provider_before_switch = self._provider
-        self._keys[self._provider] = self.key.text()
         self._provider = provider
-        self.key.setText(self._keys.get(provider, ''))
         self._models[self._provider_before_switch] = self.model.text()
         self.model.setText(self._models.get(provider, MODELS[provider][0]))
         self.model.setToolTip('Other models: ' + ', '.join(MODELS[provider][1:]))
         self.quality.setEnabled(provider == OPENAI)
+        self._credentials_changed()
+
+    def _show_keys(self, visible):
+        for field in self.key_inputs.values():
+            field.setEchoMode(QLineEdit.Normal if visible else QLineEdit.Password)
+
+    def _credentials_changed(self, *args):
+        for provider, field in self.key_inputs.items():
+            saved = bool(self.credentials.config_id(provider))
+            status = ('Unsaved change · used for this session' if saved else 'Not saved · used for this session') if field.text() else (
+                'Saved in QGIS' if saved else 'Not saved')
+            self.key_status[provider].setText(status)
+            field.setPlaceholderText('Saved in QGIS · enter a new key to replace' if saved else 'Enter a key to use or save')
+        self.save_keys_button.setEnabled(any(field.text() for field in self.key_inputs.values()) and not self._busy)
+        self._update_generate()
+
+    def _save_keys(self):
+        for provider, field in self.key_inputs.items():
+            if not field.text():
+                continue
+            try:
+                self.credentials.save(provider, field.text())
+            except Exception as error:
+                self._tell(safe_error(f'{provider}: {error}', [f.text() for f in self.key_inputs.values()]), True)
+                # An unlock cancellation must not trigger a second password dialog.
+                if isinstance(error, AuthenticationUnavailable):
+                    break
+            else:
+                field.clear()
+                self._tell(f'{provider}: API key saved securely in QGIS.')
+        self._credentials_changed()
 
     def resolved_prompt(self):
         return build_prompt(self.prompt.toPlainText(),
@@ -896,6 +944,7 @@ class BackgroundPanel(QDockWidget):
         self.stop_button.setVisible(busy)
         self.table.setEnabled(not busy)
         self.provider_page.setEnabled(not busy)
+        self._credentials_changed()
         self.reference_list.setEnabled(not busy)
         self.reference_button.setEnabled(not busy)
         self.prompt.setEnabled(not busy)
@@ -941,7 +990,7 @@ class BackgroundPanel(QDockWidget):
         if not hasattr(self, 'generate_button'):
             return
         ready = (self.plan and not self.plan['dirty'] and self.selected_tiles()
-                 and self.key.text().strip() and self.model.text().strip()
+                 and (self.key_inputs[self._provider].text().strip() or self.credentials.config_id(self._provider)) and self.model.text().strip()
                  and (self.references or self.prompt.toPlainText().strip()))
         self.generate_button.setEnabled(bool(ready) and not self._busy)
         self.generate_button.setToolTip('Generate selected tiles' if ready else 'Set an area, select tiles, then add an API key and reference images or your instructions.')
@@ -955,13 +1004,11 @@ class BackgroundPanel(QDockWidget):
                 raise ValueError('Update the grid and select tiles first.')
             provider, model = self.provider.currentText(), self.model.text().strip()
             validate_options(provider, model, self.plan['pixels'])
-            key = self.key.text().strip()
-            if not key or '\n' in key or '\r' in key:
-                raise ValueError('Enter a valid API key.')
+            key, authcfg = self.credentials.resolve(provider, self.key_inputs[provider].text())
             validate_style(self.prompt.toPlainText(), [reference['id'] for reference in self.references])
             references = [image_png(reference['path']) for reference in self.references]
             prompt = self.resolved_prompt()
-            intent = dict(provider=provider, model=model, key=key, prompt=prompt,
+            intent = dict(provider=provider, model=model, key=key, authcfg=authcfg, prompt=prompt,
                           references=references, reference_records=[dict(reference) for reference in self.references],
                           user_prompt=self.prompt.toPlainText(), quality=self.quality.currentText(),
                           concurrency=self.concurrent.value(), clip=self.clip.isChecked(),
@@ -969,7 +1016,7 @@ class BackgroundPanel(QDockWidget):
                           tile_ids=[tile.name for tile in tiles])
             self._launch_generation(intent)
         except Exception as error:
-            self._tell(safe_error(error, self.key.text().strip()), True)
+            self._tell(safe_error(error, [field.text().strip() for field in self.key_inputs.values()]), True)
 
     def _launch_generation(self, intent):
         try:
@@ -1123,7 +1170,7 @@ class BackgroundPanel(QDockWidget):
             mode = record['manifest'].get('overlap_mode', 'blend')
             self._tell(f'{name}: Saved result · {OVERLAP_MODES[mode][0]}.')
         except Exception as error:
-            self._generation_failed(name, safe_error(error, self.key.text().strip()))
+            self._generation_failed(name, safe_error(error, [field.text().strip() for field in self.key_inputs.values()]))
 
     def _generation_failed(self, name, error):
         for entry in self.generation_manifest['tiles']:
@@ -1234,5 +1281,5 @@ class BackgroundPanel(QDockWidget):
                         entry['state'] = 'cancelled'
                 self.generation_manifest['state'] = 'cancelled'
                 write_json(self.generation_directory / 'manifest.json', self.generation_manifest)
-        self._keys.clear()
-        self.key.clear()
+        for field in self.key_inputs.values():
+            field.clear()

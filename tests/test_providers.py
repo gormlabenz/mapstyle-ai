@@ -6,6 +6,7 @@ import unittest
 
 from mapstyle_ai.providers import (
     GOOGLE, OPENAI, make_request, parse_response, safe_error, validate_options,
+    validate_key,
 )
 
 
@@ -96,6 +97,26 @@ class ProviderTests(unittest.TestCase):
         message = safe_error('key=example Bearer secret-dummy https://host?key=url-secret', 'example')
         for secret in ('example', 'secret-dummy', 'url-secret'):
             self.assertNotIn(secret, message)
+
+    def test_deferred_authentication_has_no_placeholder_header(self):
+        for provider, model in ((OPENAI, 'gpt-image-2'), (GOOGLE, 'gemini-3-pro-image')):
+            url, headers, body = make_request(provider, model, None, 'Prompt', 1024, b'SOURCE', b'STYLE')
+            self.assertNotIn('Authorization', headers)
+            self.assertNotIn('x-goog-api-key', headers)
+            self.assertTrue(url.startswith('https://'))
+            self.assertTrue(body)
+            with self.assertRaises(ValueError):
+                make_request(provider, model, '', 'Prompt', 1024, b'SOURCE', b'STYLE')
+
+    def test_key_validation_and_multiple_secret_redaction(self):
+        for key in ('', ' ', '\nsecret', 'secret\r', 'two words', 'has\ttab'):
+            with self.assertRaises(ValueError):
+                validate_key(key)
+        self.assertEqual(validate_key('  valid-key  '), 'valid-key')
+        message = safe_error('openai-secret google-secret', ['openai-secret', 'google-secret'])
+        self.assertNotIn('openai-secret', message)
+        self.assertNotIn('google-secret', message)
+        self.assertNotIn('other-secret', safe_error('x-goog-api-key: other-secret'))
 
 
 if __name__ == '__main__':

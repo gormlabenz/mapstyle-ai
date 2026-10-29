@@ -28,6 +28,12 @@ def validate_options(provider, model, pixels):
         raise ValueError('Choose a current GPT Image model for 2048-pixel tiles.')
 
 
+def validate_key(key):
+    if not key.strip() or any(char.isspace() for char in key.strip()) or '\n' in key or '\r' in key:
+        raise ValueError('Enter a valid API key without spaces or line breaks.')
+    return key.strip()
+
+
 def validate_image_count(provider, model, reference_count, neighbor_count=0):
     # Limits include the geographic input and finished neighbors, not only style images.
     # https://developers.openai.com/api/reference/resources/images/methods/edit
@@ -47,8 +53,9 @@ def validate_image_count(provider, model, reference_count, neighbor_count=0):
 
 def make_request(provider, model, key, prompt, pixels, source, references, quality='auto', neighbors=()):
     validate_options(provider, model, pixels)
-    if not key.strip() or '\n' in key or '\r' in key:
-        raise ValueError('Enter a valid API key.')
+    # None explicitly defers authentication to QgsAuthManager at dispatch time.
+    if key is not None:
+        key = validate_key(key)
     references = (references,) if isinstance(references, bytes) else tuple(references)
     neighbors = tuple(neighbors)
     if not prompt.strip() or not source or any(not image for image in references):
@@ -74,8 +81,10 @@ def make_request(provider, model, key, prompt, pixels, source, references, quali
         for index, neighbor in enumerate(neighbors, 1):
             part('image[]', neighbor, f'neighbor-{index}.png')
         body.extend(f'--{boundary}--\r\n'.encode())
-        return OPENAI_URL, {'Authorization': 'Bearer ' + key,
-                            'Content-Type': 'multipart/form-data; boundary=' + boundary}, bytes(body)
+        headers = {'Content-Type': 'multipart/form-data; boundary=' + boundary}
+        if key is not None:
+            headers['Authorization'] = 'Bearer ' + key
+        return OPENAI_URL, headers, bytes(body)
     config = {'aspectRatio': '1:1'}
     if not model.startswith('gemini-2.5-'):
         config['imageSize'] = '1K' if pixels == 1024 else '2K'
@@ -86,7 +95,10 @@ def make_request(provider, model, key, prompt, pixels, source, references, quali
                        'generationConfig': {'responseModalities': ['TEXT', 'IMAGE'], 'imageConfig': config}}).encode()
     if len(body) > 20 * 1024 * 1024:
         raise ValueError('Gemini request exceeds 20 MB. Choose a smaller reference image.')
-    return GOOGLE_URL.format(model=model), {'x-goog-api-key': key, 'Content-Type': 'application/json'}, body
+    headers = {'Content-Type': 'application/json'}
+    if key is not None:
+        headers['x-goog-api-key'] = key
+    return GOOGLE_URL.format(model=model), headers, body
 
 
 def parse_response(provider, payload):
@@ -137,9 +149,11 @@ def parse_response(provider, payload):
 
 def safe_error(message, key=''):
     text = str(message)
-    if key:
-        text = text.replace(key, '[API key removed]')
+    keys = (key,) if isinstance(key, str) else key
+    for secret in sorted(filter(None, keys), key=len, reverse=True):
+        text = text.replace(secret, '[API key removed]')
     # Provider/proxy errors can echo credentials or request bodies.
     text = re.sub(r'(?i)(Bearer\s+)[^\s"<>]+', r'\1[removed]', text)
     text = re.sub(r'(?i)([?&]key=)[^&\s]+', r'\1[removed]', text)
+    text = re.sub(r'(?i)(x-goog-api-key[\s\"\x27:=]+)[^\s\"\x27<>]+', r'\1[removed]', text)
     return text[:1200]

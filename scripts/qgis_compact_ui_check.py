@@ -1,11 +1,19 @@
 """Offline interaction checks for the English overview, with zero provider calls."""
 import json
+import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tempfile
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from qgis.core import QgsApplication, QgsProject, QgsCoordinateReferenceSystem, QgsVectorLayer, QgsFeature, QgsGeometry, QgsRectangle
+if not os.environ.get('MAPSTYLE_COMPACT_CHECK_PROFILE'):
+    with tempfile.TemporaryDirectory(prefix='mapstyle-compact-check-') as directory:
+        env = dict(os.environ, QT_QPA_PLATFORM='offscreen', MAPSTYLE_COMPACT_CHECK_PROFILE=directory,
+                   QGIS_AUTH_DB_DIR_PATH=directory, QGIS_CUSTOM_CONFIG_PATH=directory)
+        result = subprocess.run([sys.executable, str(Path(__file__).resolve())], env=env, timeout=60)
+        raise SystemExit(result.returncode)
+from qgis.core import QgsApplication, QgsProject, QgsCoordinateReferenceSystem, QgsVectorLayer, QgsFeature, QgsGeometry, QgsRectangle, QgsSettings
 from qgis.gui import QgsMapCanvas
 from qgis.PyQt.QtCore import Qt, QObject, pyqtSignal, QEventLoop, QTimer
 from qgis.PyQt.QtGui import QImage, QColor
@@ -15,6 +23,8 @@ import mapstyle_ai.panel as panel_module
 
 app = QgsApplication([], False)
 app.initQgis()
+assert os.environ['MAPSTYLE_COMPACT_CHECK_PROFILE'] in app.authManager().authenticationDatabaseUri()
+assert os.environ['MAPSTYLE_COMPACT_CHECK_PROFILE'] in QgsSettings().fileName()
 window = QMainWindow()
 canvas = QgsMapCanvas()
 canvas.resize(800, 600)
@@ -125,6 +135,7 @@ class OfflineRun(QObject):
     def __init__(self, settings, tiles, existing, directory, options, accept, parent):
         super().__init__(parent)
         self.tiles = tiles
+        self.options = dict(options)
         self.active = False
         self.cancelled = False
     def start(self): self.active = True
@@ -141,7 +152,7 @@ reference_path = temporary_output / 'reference-test.png'
 reference.save(str(reference_path))
 panel.add_references([str(reference_path)])
 panel._reference_preview()
-panel.key.setText('offline-test-key')
+panel.key_inputs[panel._provider].setText('offline-test-key')
 panel.overlap_mode.setCurrentIndex(panel.overlap_mode.findData('copy'))
 assert 'exactly' in panel.overlap_description.text()
 assert panel.generate_button.isEnabled()
@@ -158,6 +169,23 @@ assert not panel._busy and panel.generator.cancelled
 assert not panel.stop_button.isVisible()
 assert json.loads(manifest.read_text())['state'] == 'cancelled'
 assert panel.provider_page.isCollapsed() and panel.advanced_page.isCollapsed()
+# The saved-key path launches with an authcfg only and still exports no secrets.
+# This check is run with a disposable profile/auth database by the documented runner.
+auth = QgsApplication.authManager()
+auth.setPasswordHelperEnabled(False)
+assert auth.setMasterPassword('disposable-compact-ui-password', True)
+panel.save_keys_button.click()
+saved_id = panel.credentials.config_id(panel._provider)
+assert saved_id and not panel.key_inputs[panel._provider].text()
+assert panel.generate_button.isEnabled()
+panel.generate_selected()
+assert panel.generator.options['authcfg'] == saved_id
+assert panel.generator.options['key'] == ''
+manifest = panel.generation_directory / 'manifest.json'
+assert 'offline-test-key' not in manifest.read_text() and 'authcfg' not in manifest.read_text()
+QTest.mouseClick(panel.stop_button, Qt.LeftButton)
+assert not panel._busy
+assert auth.removeAuthenticationConfig(saved_id)
 # View mode has its own explicit capture action and remains fixed while zooming.
 panel.area.setCurrentIndex(0)
 assert not panel.build_button.isHidden() and panel.area_layer.isHidden()
@@ -168,7 +196,7 @@ bounds = panel.plan['bounds']
 canvas.zoomByFactor(2)
 assert panel.plan['bounds'] == bounds
 # Preview for manual layout inspection, without showing credentials.
-panel.key.clear()
+panel.key_inputs[panel._provider].clear()
 panel.provider_page.setCollapsed(True)
 app.processEvents()
 assert panel.provider_page.help.isVisible()
