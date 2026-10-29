@@ -274,6 +274,10 @@ class BackgroundPanel(QDockWidget):
         form.addRow('', fit_row)
         self._update_fit_buttons()
         layout.addLayout(form)
+        self.show_frames = QCheckBox('Show tile outlines on map')
+        self.show_frames.setChecked(True)
+        self.show_frames.toggled.connect(self._grid_visibility)
+        layout.addWidget(self.show_frames)
         self.area.currentIndexChanged.connect(self._area_changed)
         self.area_layer.currentIndexChanged.connect(self._area_changed)
         self.tile_size.valueChanged.connect(self._size_changed)
@@ -297,10 +301,6 @@ class BackgroundPanel(QDockWidget):
         self.table.setToolTip('Click to select or deselect a tile. Green tiles will be generated.')
         self.table.itemSelectionChanged.connect(self._selection_changed)
         layout.addWidget(self.table)
-        self.show_frames = QCheckBox('Show tile outlines on map')
-        self.show_frames.setChecked(True)
-        self.show_frames.toggled.connect(self._grid_visibility)
-        layout.addWidget(self.show_frames)
         self.output = QLineEdit()
         self.output.setPlaceholderText('Temporary files')
         self.output.setToolTip('Leave empty for temporary storage. Choose a folder to keep generation files permanently.')
@@ -389,7 +389,7 @@ class BackgroundPanel(QDockWidget):
         self.prompt.setPlaceholderText(
             'Describe your desired style or add image-specific instructions, e.g.: '
             'Colors like Reference 1, linework like Reference 2. You can also write Referenz 1.')
-        layout.addWidget(QLabel('Your instructions (optional)'))
+        layout.addWidget(QLabel('Your Prompt (optional)'))
         self.prompt.setMinimumHeight(100)
         self.prompt.setMaximumHeight(180)
         layout.addWidget(self.prompt)
@@ -429,7 +429,7 @@ class BackgroundPanel(QDockWidget):
             'Extra pixels around each tile, used to connect neighboring images. The final tile excludes this margin. '
             'With 1024 px and a 128 px margin per side, the usable core is 768 px. Must be less than half the image size.'), self.halo)
         self.clip = QCheckBox('Crop results to area')
-        self.clip.setChecked(True)
+        self.clip.setChecked(False)
         form.addRow(help_button('Crop results to area',
             'Trim overhanging outer tiles to the selected area. Tile images are cropped, never stretched. '
             'Edges may extend by less than one pixel to preserve georeferencing.'), self.clip)
@@ -437,8 +437,9 @@ class BackgroundPanel(QDockWidget):
         self.show_overlap.toggled.connect(self._grid_visibility)
         form.addRow(help_button('Context areas',
             'Show the full input extents including overlap. Visible only while tile outlines are enabled.'), self.show_overlap)
-        self.load_inputs = QCheckBox('Load live inputs as QGIS layers')
-        form.addRow(help_button('Live input layers',
+        self.load_inputs = QCheckBox('Show Input Layers')
+        self.load_inputs.setChecked(False)
+        form.addRow(help_button('Input Layers',
             'Add the actual images sent to the provider as hidden QGIS layers for inspection.'), self.load_inputs)
         layout.addLayout(form)
         _, transition_layout = self._section('Tile transitions',

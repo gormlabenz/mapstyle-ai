@@ -93,6 +93,7 @@ assert len(panel.selected_tiles()) == 3
 QTest.mouseClick(panel.table.viewport(), Qt.LeftButton, pos=panel.table.visualItemRect(item).center())
 assert len(panel.selected_tiles()) == 4
 # Outlines belong to Area and tiles; toggling preserves the layers and their IDs.
+assert panel.show_frames.parent() == panel.area_page
 panel.show_overlap.setChecked(True)
 old_ids = list(panel.grid_layers)
 root_group = project.layerTreeRoot().findGroup(panel.run_group)
