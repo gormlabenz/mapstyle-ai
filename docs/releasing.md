@@ -45,3 +45,10 @@ The account depends on OSGeo's reply; the QGIS upload cannot precede account act
 - No paid provider requests were made. Windows/Linux desktop behavior, native keyring dialogs and paid API generation remain unverified.
 
 The GitHub workflow repeats unit tests and package validation on Linux. It does not install or exercise QGIS.
+
+## Submission status — 2026-10-29
+
+- Public source and experimental release: https://github.com/gormlabenz/mapstyle-ai/releases/tag/v0.6.1
+- GitHub checks passed. The public ZIP was downloaded again; its checksum and all packaged files match the verified source.
+- The OSGeo mantra request was sent from `gorm@labenz.io` to `mantra-request@osgeo.org` with subject `OSGeo Mantra Request: Publish QGIS plugin`. Its presence in the sender's Sent mailbox was verified. The request includes the public source repository and LinkedIn affiliation link above.
+- Awaiting OSGeo's mantra response. Account creation and the QGIS repository upload have not yet been completed. The GitHub release is available for manual installation; QGIS repository approval remains pending.
