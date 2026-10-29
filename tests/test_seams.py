@@ -49,32 +49,32 @@ class SeamPlanTests(unittest.TestCase):
 
     def test_per_tile_prompt_names_reference_and_locked_pixels(self):
         prompt = continuation_prompt('General style reference', ['A1'], [(0, 0, 256, 1024)])
-        self.assertIn('Bild 3', prompt)
+        self.assertIn('Image 3', prompt)
         self.assertIn('A1', prompt)
-        self.assertIn('Breite=256', prompt)
-        self.assertIn('unverändert', prompt)
-        self.assertIn('gesamte Kartengrundlage', continuation_prompt('General', [], []))
+        self.assertIn('width=256', prompt)
+        self.assertIn('unchanged', prompt)
+        self.assertIn('entire base map', continuation_prompt('General', [], []))
 
     def test_start_prompt_has_no_neighbor_or_crop_instructions(self):
         prompt = continuation_prompt(DEFAULT_PROMPT, [], [])
-        self.assertTrue(prompt.startswith('Gestalte die gesamte Kartengrundlage'))
-        for word in ('Streifen', 'Nachbar', 'Kontextsaum', 'Kern', 'Draufsicht'):
+        self.assertTrue(prompt.startswith('Illustrate the entire base map'))
+        for word in ('strips', 'neighbor', 'context margin', 'core', 'top-down'):
             self.assertNotIn(word, prompt)
         self.assertIn('{tile_px}', prompt)
-        self.assertIn('räumliche Anordnung aus Bild 1', prompt)
+        self.assertIn('spatial arrangement from Image 1', prompt)
 
     def test_direction_matches_actual_overlap_even_with_one_top_neighbor(self):
-        cases = [(['A1'], [(0, 0, 256, 1024)], 'links'),
-                 (['A1'], [(0, 0, 1024, 256)], 'oben'),
-                 (['B1', 'A2'], [(0, 0, 1024, 256), (0, 0, 256, 1024)], 'oben und links')]
+        cases = [(['A1'], [(0, 0, 256, 1024)], 'left'),
+                 (['A1'], [(0, 0, 1024, 256)], 'top'),
+                 (['B1', 'A2'], [(0, 0, 1024, 256), (0, 0, 256, 1024)], 'top and left')]
         for neighbors, windows, direction in cases:
             with self.subTest(direction=direction):
-                prompt = continuation_prompt('Mein eigener Zusatz', neighbors, windows)
-                self.assertTrue(prompt.startswith(f'Führe die vorhandene Illustration {direction} in Bild 1'))
-                self.assertIn('Mein eigener Zusatz', prompt)
-                self.assertIn('haben Vorrang vor Bild 2', prompt)
-                self.assertIn('ohne Unterbrechung oder Versatz', prompt)
-                self.assertEqual(prompt.count('Unveränderter Streifen in Bild 1:'), len(neighbors))
+                prompt = continuation_prompt('My custom addition', neighbors, windows)
+                self.assertTrue(prompt.startswith(f'Continue the existing illustration at the {direction} of Image 1'))
+                self.assertIn('My custom addition', prompt)
+                self.assertIn('take priority over style references', prompt)
+                self.assertIn('without gaps or offsets', prompt)
+                self.assertEqual(prompt.count('Unchanged strip in Image 1:'), len(neighbors))
 
 
 if __name__ == '__main__':

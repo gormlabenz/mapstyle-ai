@@ -27,11 +27,11 @@ def configure_reply_timeout(reply, timeout_ms):
 def image_png(path):
     image = QImage(str(path))
     if image.isNull():
-        raise ValueError(f'Bild kann nicht gelesen werden: {Path(path).name}')
+        raise ValueError(f'Cannot read image: {Path(path).name}')
     buffer = QBuffer()
     buffer.open(QIODevice.WriteOnly)
     if not image.save(buffer, 'PNG'):
-        raise ValueError('Bild konnte nicht als PNG vorbereitet werden.')
+        raise ValueError('Could not prepare image as PNG.')
     return bytes(buffer.data())
 
 
@@ -43,12 +43,12 @@ class GenerationQueue(QObject):
     finished = pyqtSignal()
     MAX_RESPONSE = 96 * 1024 * 1024
 
-    def __init__(self, jobs, provider, model, key, prompt, reference, concurrency,
+    def __init__(self, jobs, provider, model, key, prompt, references, concurrency,
                  quality='auto', parent=None, network=None, timeout_ms=DEFAULT_TIMEOUT_MS):
         super().__init__(parent)
         self.pending = list(jobs)
         self.provider, self.model, self._key = provider, model, key
-        self.prompt, self.reference = prompt, reference
+        self.prompt, self.references = prompt, references
         self.concurrency, self.quality = concurrency, quality
         self.network = network or QgsNetworkAccessManager.instance()
         self.timeout_ms = timeout_ms
@@ -69,7 +69,7 @@ class GenerationQueue(QObject):
             try:
                 url, headers, payload = providers.make_request(
                     self.provider, self.model, self._key, job.get('prompt', self.prompt), job['pixels'],
-                    Path(job['input']).read_bytes(), self.reference, self.quality,
+                    Path(job['input']).read_bytes(), self.references, self.quality,
                     neighbors=job.get('neighbors', ()))
                 request = QNetworkRequest(QUrl(url))
                 request.setAttribute(QNetworkRequest.RedirectPolicyAttribute, QNetworkRequest.ManualRedirectPolicy)
@@ -93,7 +93,7 @@ class GenerationQueue(QObject):
         if not self.pending and not self.running and self.active:
             self.active = False
             self._key = ''
-            self.reference = b''
+            self.references = ()
             self.finished.emit()
 
     def _read(self, reply):
@@ -102,7 +102,7 @@ class GenerationQueue(QObject):
             return
         data = bytes(reply.readAll())
         if len(state['buffer']) + len(data) > self.MAX_RESPONSE:
-            state['error'] = 'Anbieterantwort überschreitet 96 MB.'
+            state['error'] = 'Provider response exceeds 96 MB.'
             reply.abort()
         else:
             state['buffer'].extend(data)
@@ -110,8 +110,8 @@ class GenerationQueue(QObject):
     def _timeout(self, reply):
         state = self.running.get(reply)
         if state:
-            state['error'] = (f'Zeitlimit nach {self.timeout_ms / 60000:g} Minuten erreicht. '
-                              'Der Anbieter kann den Auftrag dennoch berechnen.')
+            state['error'] = (f'Time limit reached after {self.timeout_ms / 60000:g} minutes. '
+                              'The provider may still charge for the request.')
             reply.abort()
 
     def _done(self, reply):
@@ -146,16 +146,16 @@ class GenerationQueue(QObject):
                 raise ValueError(f'HTTP {status}{detail}')
             if reply.error() != QNetworkReply.NoError:
                 elapsed = time.monotonic() - state['started']
-                raise ValueError(f'Netzwerkfehler nach {elapsed:.0f} Sekunden: {reply.errorString()} '
-                                 f'(Plugin-Zeitlimit: {self.timeout_ms / 60000:g} Minuten).')
+                raise ValueError(f'Network error after {elapsed:.0f} seconds: {reply.errorString()} '
+                                 f'(Plugin time limit: {self.timeout_ms / 60000:g} minutes).')
             image = QImage.fromData(providers.parse_response(self.provider, payload))
             if image.isNull():
-                raise ValueError('Der Anbieter hat kein lesbares Bild geliefert.')
+                raise ValueError('The provider returned no readable image.')
             path = Path(job['output'])
             if not image.save(str(path), 'PNG'):
-                raise ValueError('Generiertes Bild konnte nicht gespeichert werden.')
+                raise ValueError('Could not save generated image.')
             if image.width() != job['pixels'] or image.height() != job['pixels']:
-                raise ValueError(f'Ergebnis ist {image.width()} × {image.height()} statt {job["pixels"]} × {job["pixels"]} Pixel. Original gespeichert; keine automatische Verzerrung.')
+                raise ValueError(f'Result is {image.width()} × {image.height()} instead of {job["pixels"]} × {job["pixels"]} pixels. Original saved without stretching.')
             self.succeeded.emit(job['id'], str(path))
         except Exception as error:
             self.failed.emit(job['id'], providers.safe_error(error, self._key))
@@ -184,4 +184,4 @@ class GenerationQueue(QObject):
             reply.deleteLater()
         self.running.clear()
         self._key = ''
-        self.reference = b''
+        self.references = ()

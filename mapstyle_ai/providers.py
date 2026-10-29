@@ -17,23 +17,43 @@ GOOGLE_URL = 'https://generativelanguage.googleapis.com/v1/models/{model}:genera
 
 def validate_options(provider, model, pixels):
     if provider not in MODELS:
-        raise ValueError('Unbekannter Bildanbieter.')
+        raise ValueError('Unknown image provider.')
     if not re.fullmatch(r'[A-Za-z0-9._-]+', model):
-        raise ValueError('Bitte eine gültige Modell-ID ohne URL oder Leerzeichen eingeben.')
+        raise ValueError('Enter a valid model ID without a URL or spaces.')
     if pixels not in (1024, 2048):
-        raise ValueError('Für die Generierung sind 1024 oder 2048 Pixel erforderlich.')
+        raise ValueError('Generation requires 1024 or 2048 pixels.')
     if model.startswith('gemini-2.5-') and pixels != 1024:
-        raise ValueError('Gemini 2.5 Flash Image unterstützt hier nur 1024-Pixel-Kacheln.')
+        raise ValueError('Gemini 2.5 Flash Image supports only 1024-pixel tiles here.')
     if model.startswith(('gpt-image-1', 'dall-e')) and pixels != 1024:
-        raise ValueError('Für 2048-Pixel-Kacheln ein aktuelles GPT-Image-Modell wählen.')
+        raise ValueError('Choose a current GPT Image model for 2048-pixel tiles.')
 
 
-def make_request(provider, model, key, prompt, pixels, source, reference, quality='auto', neighbors=()):
+def validate_image_count(provider, model, reference_count, neighbor_count=0):
+    # Limits include the geographic input and finished neighbors, not only style images.
+    # https://developers.openai.com/api/reference/resources/images/methods/edit
+    # https://ai.google.dev/gemini-api/docs/image-generation
+    count = 1 + reference_count + neighbor_count
+    limit = 16 if provider == OPENAI else (14 if model.startswith((
+        'gemini-nano-banana-', 'gemini-3-pro-image', 'gemini-3.1-flash-image',
+        'gemini-3.1-flash-lite-image')) else None)
+    if limit is not None and count > limit:
+        raise ValueError(f'{model} accepts at most {limit} input images. This selection requires '
+                         f'{count} ({reference_count} style references, 1 map input and '
+                         f'{neighbor_count} neighbors). Remove reference images or choose another model.')
+    if provider == GOOGLE and model.startswith('gemini-3-pro-image') and reference_count > 3:
+        raise ValueError('Gemini 3 Pro Image supports up to 3 style references. '
+                         'Remove reference images or choose another model.')
+
+
+def make_request(provider, model, key, prompt, pixels, source, references, quality='auto', neighbors=()):
     validate_options(provider, model, pixels)
     if not key.strip() or '\n' in key or '\r' in key:
-        raise ValueError('Bitte einen gültigen API-Key eingeben.')
-    if not prompt.strip() or not source or not reference:
-        raise ValueError('Prompt, Eingabebild und Referenzbild sind erforderlich.')
+        raise ValueError('Enter a valid API key.')
+    references = (references,) if isinstance(references, bytes) else tuple(references)
+    neighbors = tuple(neighbors)
+    if not prompt.strip() or not source or any(not image for image in references):
+        raise ValueError('A resolved prompt and readable input images are required.')
+    validate_image_count(provider, model, len(references), len(neighbors))
     if provider == OPENAI:
         boundary = 'ai-map-' + uuid.uuid4().hex
         body = bytearray()
@@ -49,7 +69,8 @@ def make_request(provider, model, key, prompt, pixels, source, reference, qualit
                             ('output_format', 'png')]:
             part(name, value)
         part('image[]', source, 'source.png')
-        part('image[]', reference, 'style-reference.png')
+        for index, reference in enumerate(references, 1):
+            part('image[]', reference, f'style-reference-{index}.png')
         for index, neighbor in enumerate(neighbors, 1):
             part('image[]', neighbor, f'neighbor-{index}.png')
         body.extend(f'--{boundary}--\r\n'.encode())
@@ -59,12 +80,12 @@ def make_request(provider, model, key, prompt, pixels, source, reference, qualit
     if not model.startswith('gemini-2.5-'):
         config['imageSize'] = '1K' if pixels == 1024 else '2K'
     parts = [{'text': prompt}]
-    for png in (source, reference, *neighbors):
+    for png in (source, *references, *neighbors):
         parts.append({'inlineData': {'mimeType': 'image/png', 'data': base64.b64encode(png).decode('ascii')}})
     body = json.dumps({'contents': [{'role': 'user', 'parts': parts}],
                        'generationConfig': {'responseModalities': ['TEXT', 'IMAGE'], 'imageConfig': config}}).encode()
     if len(body) > 20 * 1024 * 1024:
-        raise ValueError('Gemini-Anfrage ist größer als 20 MB. Ein kleineres Referenzbild wählen.')
+        raise ValueError('Gemini request exceeds 20 MB. Choose a smaller reference image.')
     return GOOGLE_URL.format(model=model), {'x-goog-api-key': key, 'Content-Type': 'application/json'}, body
 
 
@@ -73,12 +94,12 @@ def parse_response(provider, payload):
     try:
         response = json.loads(payload)
     except (ValueError, UnicodeDecodeError) as error:
-        raise ValueError('Der Anbieter hat keine gültige JSON-Antwort geliefert.') from error
+        raise ValueError('The provider returned invalid JSON.') from error
     if not isinstance(response, dict):
-        raise ValueError('Unerwartetes Antwortformat des Anbieters.')
+        raise ValueError('Unexpected provider response format.')
     if response.get('error'):
         error = response['error']
-        message = error.get('message', 'API-Fehler') if isinstance(error, dict) else str(error)
+        message = error.get('message', 'API error') if isinstance(error, dict) else str(error)
         raise ValueError(message)
     encoded = None
     if provider == OPENAI:
@@ -87,7 +108,7 @@ def parse_response(provider, payload):
                 encoded = item['b64_json']
                 break
         if not encoded:
-            raise ValueError('OpenAI hat kein Bild geliefert. Ein GPT-Image-Modell mit Base64-Ausgabe wählen.')
+            raise ValueError('OpenAI returned no image. Choose a GPT Image model with Base64 output.')
     else:
         reasons = []
         for candidate in response.get('candidates', []):
@@ -104,21 +125,21 @@ def parse_response(provider, payload):
                 reasons.append(candidate['finishReason'])
         if not encoded:
             reason = response.get('promptFeedback', {}).get('blockReason') or ', '.join(reasons)
-            raise ValueError('Gemini hat kein Bild geliefert.' + (f' Grund: {reason}' if reason else ''))
+            raise ValueError('Gemini returned no image.' + (f' Reason: {reason}' if reason else ''))
     try:
         result = base64.b64decode(encoded, validate=True)
     except (ValueError, TypeError, binascii.Error) as error:
-        raise ValueError('Die Bilddaten des Anbieters sind beschädigt.') from error
+        raise ValueError('The provider image data is corrupt.') from error
     if not result:
-        raise ValueError('Der Anbieter hat leere Bilddaten geliefert.')
+        raise ValueError('The provider returned empty image data.')
     return result
 
 
 def safe_error(message, key=''):
     text = str(message)
     if key:
-        text = text.replace(key, '[API-Key entfernt]')
+        text = text.replace(key, '[API key removed]')
     # Provider/proxy errors can echo credentials or request bodies.
-    text = re.sub(r'(?i)(Bearer\s+)[^\s"<>]+', r'\1[entfernt]', text)
-    text = re.sub(r'(?i)([?&]key=)[^&\s]+', r'\1[entfernt]', text)
+    text = re.sub(r'(?i)(Bearer\s+)[^\s"<>]+', r'\1[removed]', text)
+    text = re.sub(r'(?i)([?&]key=)[^&\s]+', r'\1[removed]', text)
     return text[:1200]

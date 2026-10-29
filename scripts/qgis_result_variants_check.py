@@ -30,28 +30,32 @@ with TemporaryDirectory() as directory:
                             results=QListWidget(), _set_tile_status=lambda *a:None, _tell=lambda *a:None)
     for method in ('_store_result', '_add_raster'):
         setattr(panel, method, MethodType(getattr(BackgroundPanel, method), panel))
-    for protected in ([(0,0,4,16)], []):
-        manifest['tiles'][0]['results'] = []
-        anchor = BackgroundPanel._accept_seam_result(panel, tile.name, str(root/'response.png'),
-                                                     dict(png=str(root/'input.png'), protected=protected))
-        entries = manifest['tiles'][0]['results']
-        assert [e['variant'] for e in entries] == ['KI-Original', 'Überlappung zurückkopiert', 'Überlappung weich überblendet']
-        raw, stitched, blended = [QImage(str(root/e['full_image'])) for e in entries]
-        assert blended.pixelColor(2,8) == QColor('red' if protected else 'blue')
-        assert blended.pixelColor(3,8) == QColor('blue')
-        assert raw.pixelColor(2,8) == QColor('blue')
-        assert stitched.pixelColor(2,8) == QColor('red' if protected else 'blue')
-        assert stitched.pixelColor(8,8) == QColor('blue')
-        assert QImage(str(root/entries[0]['file'].replace('.tif','-core.png'))).width() == 12
-        assert anchor['png'] == str(root/entries[2]['full_image'])
-        assert panel.seam_sources[tile.name] == anchor
-    groups = panel.project.layerTreeRoot().children()[0].children()
-    assert {g.name():g.itemVisibilityChecked() for g in groups} == {
-        'Ergebnisse · KI-Original':False, 'Ergebnisse · Überlappung zurückkopiert':False,
-        'Ergebnisse · Überlappung weich überblendet':True}
-    assert 'geschützte' not in continuation_prompt('Stil', [], [])
-    assert 'alle Pixel in den bereits illustrierten Streifen exakt und unverändert' in continuation_prompt('Stil', ['A1'], [(0,0,4,16)])
-    assert json.loads((root/'manifest.json').read_text())['tiles'][0]['results'][0]['variant'] == 'KI-Original'
+    variants = {'original':'AI original', 'copy':'Overlap restored', 'blend':'Blended overlap'}
+    for mode, variant in variants.items():
+        for protected in ([(0,0,4,16)], []):
+            manifest['overlap_mode'] = mode
+            manifest['tiles'][0]['results'] = []
+            anchor = BackgroundPanel._accept_seam_result(panel, tile.name, str(root/'response.png'),
+                                                         dict(png=str(root/'input.png'), protected=protected))
+            entries = manifest['tiles'][0]['results']
+            assert len(entries) == 1 and entries[0]['variant'] == variant
+            result = QImage(str(root/entries[0]['full_image']))
+            assert result.pixelColor(2,8) == QColor('red' if protected and mode != 'original' else 'blue')
+            assert result.pixelColor(3,8) == QColor('red' if protected and mode == 'copy' else 'blue')
+            assert result.pixelColor(8,8) == QColor('blue')
+            assert QImage(str(root/entries[0]['file'].replace('.tif','-core.png'))).width() == 12
+            assert anchor['png'] == str(root/entries[0]['full_image'])
+            assert panel.seam_sources[tile.name] == anchor
+            groups = panel.project.layerTreeRoot().children()[0].children()
+            assert {g.name():g.itemVisibilityChecked() for g in groups} == {'Results · ' + variant: True}
+            stored = json.loads((root/'manifest.json').read_text())
+            assert stored['overlap_mode'] == mode
+            assert stored['tiles'][0]['results'][0]['variant'] == variant
+            # The response file remains unchanged even when copy/fade is selected.
+            assert QImage(str(root/'response.png')).pixelColor(2,8) == QColor('blue')
+            panel.project.clear()
+    assert 'protected' not in continuation_prompt('Style', [], [])
+    assert 'every pixel in the already illustrated strips exactly and unchanged' in continuation_prompt('Style', ['A1'], [(0,0,4,16)])
     # Full-width ramp: exact old at the visible edge, exact new at its end.
     for rectangles in ([(0,0,8,16)], [(0,0,16,8)], [(0,0,16,8), (0,0,8,16)]):
         faded = blend_regions(response, original, rectangles, 2)
@@ -65,4 +69,4 @@ with TemporaryDirectory() as directory:
         assert 140 <= middle.red() <= 165 and 90 <= middle.blue() <= 115
     assert blend_regions(response, original, [], 2) == response
     panel.project.clear()
-print('PASS: full-width linear fade, top/left/corner, three variants, preserved raw pixels, restored overlap, unchanged start tile, cropped outputs, visibility, anchor and conditional prompt')
+print('PASS: full-width linear fade, top/left/corner, three transition modes, preserved raw response, exact copy, unchanged start tile, cropped outputs, visibility, selected neighbor anchor and per-run mode')

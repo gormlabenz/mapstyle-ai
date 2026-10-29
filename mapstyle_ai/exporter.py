@@ -22,7 +22,7 @@ def write_geotiff(png, target, bounds, crs_wkt):
         creationOptions=['COMPRESS=DEFLATE', 'TILED=YES'],
     )
     if dataset is None:
-        raise RuntimeError(f'GeoTIFF konnte nicht geschrieben werden: {target}')
+        raise RuntimeError(f'Could not write GeoTIFF: {target}')
     dataset.FlushCache()
     dataset = None
 
@@ -65,7 +65,7 @@ class TileExporter(QObject):
         if any(abs(a - b) > max(settings.mapUnitsPerPixel() * 1e-5, 1e-10)
                for a, b in zip(tile.source, (
                    actual.xMinimum(), actual.yMinimum(), actual.xMaximum(), actual.yMaximum()))):
-            self._finish('failed', 'Render-Ausdehnung passt nicht zum Kachelraster.')
+            self._finish('failed', 'Render extent does not match the tile grid.')
             return
         self.job = QgsMapRendererSequentialJob(settings)
         self.job.finished.connect(self._rendered)
@@ -88,7 +88,7 @@ class TileExporter(QObject):
             png = self.directory / 'inputs' / f'{tile.name}.png'
             tif = self.directory / 'inputs' / f'{tile.name}.tif'
             if image.isNull() or not image.save(str(png), 'PNG'):
-                raise RuntimeError(f'Bildexport fehlgeschlagen: {tile.name}')
+                raise RuntimeError(f'Image export failed: {tile.name}')
             write_geotiff(png, tif, tile.source, self.manifest['crs_wkt'])
             record = self.manifest['tiles'][self.index]
             record.update(state='exported', input_png=f'inputs/{png.name}',

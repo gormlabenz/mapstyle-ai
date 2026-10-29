@@ -47,7 +47,7 @@ class SeamlessRun(QObject):
             if name in blocked:
                 self.pending.remove(name)
                 self.failed_ids.add(name)
-                self.failed.emit(name, 'Nicht gestartet: Ein benötigter Nachbar ist fehlgeschlagen.')
+                self.failed.emit(name, 'Not started: a required neighbor failed.')
         ready = ready_tiles(self.pending, self.parents, self.completed)
         while ready and len(self.running) < self.options['concurrency'] and not self.cancelled:
             name = ready.pop(0)
@@ -63,7 +63,7 @@ class SeamlessRun(QObject):
         if not self.pending and not self.running:
             self.active = False
             self._key = ''
-            self.options['reference'] = b''
+            self.options['references'] = ()
             self.finished.emit()
 
     def _exported(self, name, prepared):
@@ -79,12 +79,12 @@ class SeamlessRun(QObject):
         exporter.deleteLater()
         self.prepared[name] = prepared
         self.input_ready.emit(name, prepared)
-        prompt = continuation_prompt(self.options['prompt'], prepared['neighbors'], prepared['protected'])
+        prompt = continuation_prompt(self.options['prompt'], prepared['neighbors'], prepared['protected'], len(self.options['references']))
         neighbor_bytes = [Path(self.available[parent]['png']).read_bytes() for parent in prepared['neighbors']]
         job = dict(id=name, input=prepared['png'], pixels=self.options['pixels'], prompt=prompt,
                    neighbors=neighbor_bytes, output=str(self.directory/'responses'/f'{name}.png'))
         queue = GenerationQueue([job], self.options['provider'], self.options['model'], self._key,
-                                prompt, self.options['reference'], 1, self.options['quality'], parent=self)
+                                prompt, self.options['references'], 1, self.options['quality'], parent=self)
         self.running[name] = queue
         queue.started.connect(self.started)
         queue.succeeded.connect(self._succeeded)
@@ -95,7 +95,7 @@ class SeamlessRun(QObject):
 
     def _succeeded(self, name, filename):
         try:
-            # The callback restores protected pixels and inserts the result synchronously.
+            # The callback applies the selected overlap treatment and inserts the result synchronously.
             # Dependents become eligible only after that work has succeeded.
             source = self.accept(name, filename, self.prepared[name])
             self.available[name] = source
@@ -144,4 +144,4 @@ class SeamlessRun(QObject):
         self.running.clear()
         self.pending.clear()
         self._key = ''
-        self.options['reference'] = b''
+        self.options['references'] = ()

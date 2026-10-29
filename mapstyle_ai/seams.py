@@ -2,8 +2,7 @@
 import math
 
 
-DEFAULT_PROMPT = """Übernimm die räumliche Anordnung aus Bild 1. Erhalte Positionen, Grundformen und Verbindungen von Gebäuden, Straßen, Wegen, Gewässern und Flächen. Gestalte die Details passend zum Illustrationsstil, ohne zusätzliche Gebäude oder Wege zu erfinden. Behalte Kartenorientierung, Maßstab und Bildausschnitt bei; die Darstellung der Objekte folgt dem Illustrationsstil. Bild 2 dient nur als Stilreferenz, nicht als geografische Vorlage. Ohne Beschriftungen, Legende oder Rahmen.
-Gib das vollständige Bild mit genau {tile_px} × {tile_px} Pixeln zurück."""
+from .prompts import DEFAULT_PROMPT
 
 
 def dependencies(tiles, existing=()):
@@ -15,7 +14,7 @@ def dependencies(tiles, existing=()):
         result[tile.name] = [positions[pos] for pos in ((tile.row - 1, tile.column),
                                                        (tile.row, tile.column - 1)) if pos in positions]
     if sum(not parents for parents in result.values()) > 1:
-        raise ValueError('Die Auswahl hat mehrere getrennte Startpunkte. Bitte ein zusammenhängendes Gebiet mit Anschlüssen von oben oder links wählen.')
+        raise ValueError('Selection has multiple disconnected starting points. Select a connected area with neighbors above or to the left.')
     return result
 
 
@@ -42,30 +41,30 @@ def overlap_windows(target, neighbor, resolution):
         exact = value / resolution
         rounded = round(exact)
         if not math.isclose(exact, rounded, rel_tol=0, abs_tol=1e-5):
-            raise ValueError('Nachbarkachel passt nicht exakt auf das Pixelraster.')
+            raise ValueError('Neighbor tile does not align exactly with the pixel grid.')
         return rounded
     width, height = pixel(right-left), pixel(top-bottom)
     return ((pixel(left-target[0]), pixel(target[3]-top), width, height),
             (pixel(left-neighbor[0]), pixel(neighbor[3]-top), width, height))
 
 
-def continuation_prompt(prompt, neighbors, windows):
+def continuation_prompt(prompt, neighbors, windows, reference_count=1):
     if not neighbors:
-        return 'Gestalte die gesamte Kartengrundlage in Bild 1 im Illustrationsstil von Bild 2.\n' + prompt
-    sides = ['links' if h > w else 'oben' for x, y, w, h in windows]
-    location = ' und '.join(dict.fromkeys(sides))
-    lines = [f'Führe die vorhandene Illustration {location} in Bild 1 über die gesamte übrige Kartengrundlage fort.',
-             'Übernimm alle Pixel in den bereits illustrierten Streifen exakt und unverändert aus Bild 1. '
-             'Bearbeite nur den Bereich außerhalb dieser Streifen. '
-             'Die Streifen geben den fortzusetzenden Stil vor und haben Vorrang vor Bild 2. '
-             'Führe Linien ohne Unterbrechung oder Versatz weiter und schließe Farben und Texturen '
-             'ohne sichtbaren Wechsel an, sodass das Ergebnis wie eine durchgehende Illustration wirkt.',
+        return 'Illustrate the entire base map in Image 1 using the style instructions below.\n' + prompt
+    sides = ['left' if h > w else 'top' for x, y, w, h in windows]
+    location = ' and '.join(dict.fromkeys(sides))
+    lines = [f'Continue the existing illustration at the {location} of Image 1 across the remaining base map.',
+             'Copy every pixel in the already illustrated strips exactly and unchanged from Image 1. '
+             'Edit only the area outside these strips. '
+             'The strips define the style to continue and take priority over style references and user styling instructions. '
+             'Continue lines without gaps or offsets and match colors and textures '
+             'without visible transitions, so the result reads as one continuous illustration.',
              prompt,
-             'Die weiteren Nachbarbilder liefern zusätzlichen Kontext; die genaue Anschlussvorgabe '
-             'sind die illustrierten Streifen in Bild 1.']
-    for index, (name, rectangle, side) in enumerate(zip(neighbors, windows, sides), 3):
+             'The additional neighbor images provide context; the exact connection requirements '
+             'are the illustrated strips in Image 1.']
+    for index, (name, rectangle, side) in enumerate(zip(neighbors, windows, sides), 2 + reference_count):
         x, y, w, h = rectangle
-        lines.append(f'Bild {index}: Nachbarkachel {name}, Anschluss {side}. '
-                     f'Unveränderter Streifen in Bild 1: x={x}, y={y}, Breite={w}, Höhe={h} Pixel '
-                     '(Ursprung oben links).')
+        lines.append(f'Image {index}: neighbor tile {name}, connection at {side}. '
+                     f'Unchanged strip in Image 1: x={x}, y={y}, width={w}, height={h} pixels '
+                     '(origin at top left).')
     return '\n'.join(lines)

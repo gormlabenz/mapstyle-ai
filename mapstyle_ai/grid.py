@@ -30,18 +30,18 @@ class Tile:
 def build_grid(bounds, resolution, pixels=1024, halo=128, contained=False, limit=2500, tile_size=None, origin=(0, 0)):
     xmin, ymin, xmax, ymax = bounds
     if not all(math.isfinite(v) for v in (*bounds, resolution)):
-        raise ValueError("Ausdehnung und Auflösung müssen endlich sein.")
+        raise ValueError("Extent and resolution must be finite.")
     if xmax <= xmin or ymax <= ymin or resolution <= 0:
-        raise ValueError("Gebiet und Kartenauflösung müssen größer als null sein.")
+        raise ValueError("Area and map resolution must be greater than zero.")
     if pixels <= 0 or halo < 0 or 2 * halo >= pixels:
-        raise ValueError("Der Kontextsaum muss kleiner als die halbe Bildkante sein.")
+        raise ValueError("The context margin must be smaller than half the image size.")
     side = (pixels - 2 * halo) * resolution if tile_size is None else tile_size
     if not math.isfinite(side) or side <= 0:
-        raise ValueError("Die Kachelgröße muss endlich und größer als null sein.")
+        raise ValueError("Tile size must be finite and greater than zero.")
     if tile_size is not None:
         # A fitted grid uses the saved AOI corner; manual grids use CRS origin.
         if not all(math.isfinite(value) for value in origin):
-            raise ValueError("Der Rasterursprung muss endlich sein.")
+            raise ValueError("Grid origin must be finite.")
         ox, oy = origin
         def snap(value):
             ratio = value / side
@@ -61,7 +61,7 @@ def build_grid(bounds, resolution, pixels=1024, halo=128, contained=False, limit
         return math.floor(ratio) if contained else math.ceil(ratio)
     columns, rows = max(0, count(xmax - xmin)), max(0, count(ymax - ymin))
     if rows * columns > limit:
-        raise ValueError(f"Mehr als {limit} Kacheln. Kleineres Gebiet oder größere Kachelgröße wählen.")
+        raise ValueError(f"More than {limit} tiles. Choose a smaller area or larger tile size.")
     margin = halo * resolution
     tiles = []
     for row in range(rows):
@@ -83,7 +83,7 @@ def fitted_size(bounds, side, larger, limit=2500):
     """
     xmin, ymin, xmax, ymax = bounds
     if not all(math.isfinite(v) for v in (*bounds, side)) or side <= 0 or xmax <= xmin or ymax <= ymin:
-        raise ValueError("Gebiet und Kachelgröße müssen endlich und größer als null sein.")
+        raise ValueError("Area and tile size must be finite and greater than zero.")
     width, height = xmax - xmin, ymax - ymin
     candidates = sorted({length / n for length in (width, height)
                          for n in range(1, limit + 1)}, reverse=not larger)
@@ -112,7 +112,7 @@ def crop_window(tile, resolution, halo, pixels, bounds=None):
         max(core[0], bounds[0]), max(core[1], bounds[1]),
         min(core[2], bounds[2]), min(core[3], bounds[3]))
     if target[0] >= target[2] or target[1] >= target[3]:
-        raise ValueError("Kachel liegt außerhalb des Gebiets.")
+        raise ValueError("Tile lies outside the area.")
     size = pixels - 2 * halo
     def snap(v):
         return round(v) if math.isclose(v, round(v), abs_tol=1e-8) else v

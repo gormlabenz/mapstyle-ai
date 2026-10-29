@@ -77,8 +77,8 @@ class ProviderTests(unittest.TestCase):
         for provider, payload, message in [
             (OPENAI, {'error': {'message': 'Quota exceeded'}}, 'Quota'),
             (GOOGLE, {'promptFeedback': {'blockReason': 'SAFETY'}}, 'SAFETY'),
-            (OPENAI, {'data': [{'b64_json': '!!'}]}, 'beschädigt'),
-            (OPENAI, {'data': [{'url': 'https://untrusted.example'}]}, 'kein Bild'),
+            (OPENAI, {'data': [{'b64_json': '!!'}]}, 'corrupt'),
+            (OPENAI, {'data': [{'url': 'https://untrusted.example'}]}, 'no image'),
         ]:
             with self.assertRaisesRegex(ValueError, message):
                 parse_response(provider, json.dumps(payload))

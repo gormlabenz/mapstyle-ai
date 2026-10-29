@@ -37,7 +37,7 @@ panel.layers.item(0).setCheckState(Qt.Checked)
 panel.area.setCurrentIndex(1)
 panel.tile_size.setValue(2)
 panel._build()
-assert panel.plan and not panel.plan['dirty'], panel.message.text()
+assert panel.plan and not panel.plan['dirty'], panel.log.toPlainText()
 assert panel.plan['crs'].authid() == 'EPSG:32632'
 assert len(panel.selected_tiles()) == len(panel.tiles)
 cores = [t.core for t in panel.tiles]
@@ -59,7 +59,7 @@ panel.tile_unit.setCurrentIndex(1)
 assert panel.tile_size.value() == 2
 panel.tile_size.setValue(1)
 loop = QEventLoop(); QTimer.singleShot(700, loop.quit); loop.exec()
-assert panel.plan['tile_size_m'] == 1000, panel.message.text()
+assert panel.plan['tile_size_m'] == 1000, panel.log.toPlainText()
 assert bounds == panel.plan['bounds']
 # Fit buttons reproduce the 600 m example, including a non-zero metric origin.
 fit_bounds = (500100, 5300200, 500700, 5300800)
@@ -67,13 +67,12 @@ panel._grid_area = (fit_bounds, panel.plan['crs'])
 panel.tile_unit.setCurrentIndex(0)
 panel.tile_size.setValue(400)
 panel._build()
-panel.tabs.setCurrentIndex(0)
 assert '2 × 2' in panel.more_tiles.text()
 panel.more_tiles.click()
 assert len(panel.tiles) == 4 and panel.plan['tile_size_m'] == 300
 assert panel.plan['grid_origin'] == (fit_bounds[0], fit_bounds[3])
-assert panel.tabs.currentIndex() == 0
-assert '0.0 %' in panel.fit_hint.text()
+assert not hasattr(panel, 'tabs')
+assert '0.0% overhang' in panel.tile_size.toolTip()
 panel.fewer_tiles.click()
 assert len(panel.tiles) == 1 and panel.plan['tile_size_m'] == 600
 assert panel.tiles[0].core == fit_bounds

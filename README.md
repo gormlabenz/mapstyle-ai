@@ -1,150 +1,91 @@
-# MapStyle AI · QGIS 3.44 · Version 0.4.1
+# MapStyle AI · QGIS 3.44 · Version 0.6.0
 
-Python-Plugin für KI-Kartenhintergründe aus vorhandenen QGIS-Layern und einem austauschbaren Stilreferenzbild. Nutzt QGIS, Qt und GDAL; keine zusätzlichen Python-Pakete oder Webserver nötig.
+A QGIS plugin for illustrated, georeferenced map backgrounds from existing map layers, style references and/or a style description. Uses QGIS, Qt and GDAL without additional Python packages.
 
-## Projektordner und Beispieldaten
+## Interface
 
-- `mapstyle_ai/`: QGIS-Plugin.
-- `scripts/` und `tests/`: Hilfsskripte und automatisierte Tests.
-- `docs/`: Platz für die Projektdokumentation.
-- `examples/`: Platz für kleine, teilbare Beispiele.
-- `local/`: persönliche Versuche und Arbeitsdaten; durch Git ausgeschlossen.
-- `dist/`: gebaute Plugin-Pakete; durch Git ausgeschlossen.
-- `ahrensburg/`: vorhandene lokale Kartengrundlagen und QGIS-Projekte für Ahrensburg; durch Git ausgeschlossen. Der Ordner bleibt zur Erhaltung vorhandener Dateipfade an seinem bisherigen Ort.
-- `examples/mapstyle-ai-test/`: lokales, durch Git ausgeschlossenes manuelles Testprojekt mit Referenzbildern, Generierungsläufen und Screencast. Einstieg: [QGIS-Projekt](examples/mapstyle-ai-test/mapstyle-ai-test.qgz), [Ordnerübersicht](examples/mapstyle-ai-test/README.md).
-- `test-output/`: Ergebnisse der automatisierten Prüfungen; durch Git ausgeschlossen.
+One scrollable English overview replaces the tabs. Input layers, Area and tiles, and Generation start open; Tiles, **Provider settings**, **Advanced settings** and **Log** start collapsed. Question marks provide hover hints and clickable help, including in collapsed headers. Form fields use separate label, input and fixed-width help columns, with all help icons on the right. The input-layer header also contains an icon to refresh project layers.
 
-## Ablauf
+1. **Input layers:** select the raster and vector layers used as input for AI image generation. Their rendered map images are sent as spatial references to the selected provider (OpenAI or Google Gemini), which generates the output map layers using the style reference and prompt. QGIS drawing order and styling are preserved. Labels and selection highlights are excluded; embedded raster text remains visible.
+2. **Area and tiles:** capture the **Current map view** with **Set area**, or select **Layer extent** to use a layer's bounding rectangle immediately. The area layer does not have to be an input layer. Set square tile size in m or km. The fitting buttons sit directly below the size input in the same form column.
+3. **Tiles:** all tiles start selected in green. Click to select or deselect; drag for a range. Running and completed tiles show status. **Show tile outlines on map** controls both core outlines and any enabled context overlay.
+4. **Save to:** empty means temporary storage. Optionally choose a folder for permanent generation files; the reset icon returns to temporary storage.
+5. **Generation:** expand provider settings to set provider, model, quality, API key and parallel jobs. Add one or more style references and/or describe the desired style in the initially empty optional instructions field, then generate selected tiles. The cancel button appears while running.
+6. **Advanced settings:** image pixels, edge treatment, context margin, crop-to-area, context overlay, optional live-input layers, input preview, manual result import and a collapsible activity log.
 
-1. Grundlagenlayer wählen, auf das Gebiet zoomen und unter **1 · Grundlagen** das Raster erstellen. Gebiet: sichtbarer Ausschnitt oder rechteckige Ausdehnung eines Layers. Kartenauflösung wird eingefroren, Kartendrehung muss 0° sein.
-2. Unter **2 · Kacheln** die gewünschten Zellen auswählen, zum Beispiel **2 × 2 links oben**, und einen existierenden Ausgabeordner wählen. **Es werden noch keine Eingabebilder exportiert.**
-3. Unter **3 · Generierung** Anbieter, Modell-ID, API-Key, Referenzbild und Parallelität einstellen. Den bearbeitbaren Prompt prüfen und **Ausgewählte Kacheln generieren** starten.
-4. Die erste Kachel, beispielsweise A1, wird unmittelbar aus den Grundlagen gerendert und generiert. Das fertige Bild wird räumlich zugeordnet und in QGIS eingesetzt.
-5. Erst danach werden B1 und A2 freigegeben. Ihre Eingabebilder werden jetzt frisch aus QGIS gerendert, einschließlich der vollständigen fertigen Nachbarbilder in den Überlappungsbereichen. Diese Nachbarn werden zusätzlich als Bildreferenzen übertragen.
-6. B2 wartet auf B1 und A2. Das setzt sich durch das Raster fort. Die Parallelität ist ein Maximum; tatsächlich gleichzeitig starten nur Kacheln, deren Nachbarn fertig sind.
+Temporary images are real files in the system temporary directory because QGIS layers need backing files. They remain available across panel reloads but may be removed by the system later. Choose a permanent output folder to retain results for future projects. Keys stay in panel memory only and are excluded from all generation files and logs.
 
-Der Standardprompt besteht aus einem gemeinsamen, bearbeitbaren Grundteil und einer automatisch vorangestellten Aufgabe: Die Startkachel wird vollständig im Stil von Bild 2 gestaltet; Folgekacheln führen die illustrierten Streifen links, oben oder an beiden Seiten fort. Deren Stil hat Vorrang vor der allgemeinen Referenz. Bild 1 bestimmt die räumliche Anordnung; stilistische Vereinfachungen sind erlaubt, Orientierung, Maßstab und Ausschnitt bleiben erhalten. Nur bei vorhandenen Nachbarn werden Erhalt und Anschluss der Streifen beschrieben und ihre Pixelrechtecke genannt. Bild 1 ist das zusammengesetzte Live-Eingabebild, Bild 2 die Stilreferenz, weitere Bilder liefern Nachbarkontext. Interne Kern- und Kontextsaumgrößen stehen nicht mehr im Standardprompt.
+## Geographic grid
 
-**Drei Ergebnisvarianten:** Jede generierte Kachel wird als „KI-Original“, „Überlappung zurückkopiert“ und „Überlappung weich überblendet“ georeferenziert gespeichert. Die getrennten Ergebnisgruppen in QGIS erlauben den Vergleich; standardmäßig ist nur die weiche Variante sichtbar. Dabei bleibt der abgeschnittene äußere Kontextsaum vollständig vom alten Bild erhalten. Ab dem sichtbaren Kachelrand nimmt dessen Anteil linear von 100 % bis auf 0 % am inneren Ende der Überlappung ab. Bei Anschlüssen von oben und links werden die Deckkräfte in der Ecke kombiniert. Weitere Kacheln verwenden die weich überblendete Variante als Anschluss. Bei der Startkachel sind alle drei Varianten identisch.
+Tile size is the square **core** side length in meters, independent of map zoom, canvas dimensions, image pixels and context. A local UTM CRS is chosen from the area center; polar regions use UPS. The grid is intended for regional areas. Manual sizes align to multiples of their side length from CRS origin (0, 0). Identical sizes in the same CRS remain aligned when an area expands; changing UTM zones creates a new grid.
 
-**Zusätzlicher technischer Schutz:** Nach der Antwort werden die bereits fertigen Überlappungsbereiche exakt aus dem Eingabebild zurückkopiert. Die unveränderte Übernahme dieser Pixel hängt damit nicht vom Modell ab. Das neue Bild einschließlich Kontext wird für weitere Nachbarn aufbewahrt. Sichtbar wird der zugeschnittene Kern.
+**Fewer tiles** and **More tiles** choose the nearest larger or smaller side length from area width/n and height/n, aligning the grid to the saved area's top-left corner. At least one dimension fits exactly; rectangular areas may retain overhang in the other dimension to preserve square tiles. For 600 × 600 m with an initial 400 m size, the proposals are 1 × 1 at 600 m or 2 × 2 at 300 m. Button labels show the proposed columns × rows; tooltips show size and count. Detailed overhang and grid information are written to the log.
 
-Die gesamte Kartenkomposition wird über QGIS gerendert; die Nachbarbilder werden zusätzlich pixelgenau eingesetzt, um Resamplingunterschiede im geschützten Bereich auszuschließen. Dabei sind ausschließlich die gewählten Grundlagen und die vorgesehenen Nachbarn beteiligt. Alte Ergebnisgruppen, Rasterhilfen, Beschriftungen und Auswahlmarkierungen gelangen nicht versehentlich in die Eingaben.
+Fitting enables full coverage. Image size, context, unit switching and navigation preserve the fitted size and origin. Manually editing tile size or capturing a new area resets fitting. A newly computed grid selects all tiles and resets neighbor associations; existing result files and project layers remain. The saved area lasts for the panel session. Grid size is limited to 2500 tiles.
 
-## Auswahl und Wiederholungen
+Input images are 1024 or 2048 square pixels, including context. At 1024 pixels and 128 context pixels per side, the visible core is 768 pixels wide. With a 2 km core, resolution is 2000 / 768 ≈ 2.604 m/pixel. This describes georeferencing, not guaranteed AI detail. Rendering uses 96 DPI and north-up orientation. Optional cropping trims edge tiles to the area, rounding outward by less than one pixel without stretching images.
 
-- „Alle“, „Keine“, „2 × 2 links oben“ und „Offene“ unterstützen die Auswahl im Tabellenraster. Ziehen/Umschalt-Klick markiert Bereiche, Cmd/Strg-Klick ergänzt einzelne Zellen.
-- Im ersten Durchlauf ist eine Auswahl mit einem gemeinsamen Startpunkt nötig. Getrennte Inseln ohne Anschlüsse von oben/links werden vor dem Start abgewiesen.
-- Im selben Panel können nach einem kleinen Test weitere Kacheln ausgewählt werden; fertige Nachbarn aus vorigen Durchläufen werden weitergereicht. „Offene“ wählt noch nicht erfolgreich erzeugte Kacheln aus.
-- Eine erneut ausgewählte Kachel wird neu generiert. Ihre alte Version dient in diesem Durchlauf nicht als fertiger Anschluss; abhängige Kacheln warten auf die neue Version.
-- Bei Fehlern eines benötigten Nachbarn werden abhängige Kacheln ohne API-Aufruf als nicht gestartet markiert. Unabhängige bereits freigegebene Zweige dürfen abschließen.
-- Ein neu erstelltes Raster setzt die Zuordnung der Anschlussbilder im Panel zurück. Alte Dateien und geladene Ergebnislayer bleiben erhalten. Das gilt ebenfalls beim Wechsel von Version 0.2 zu 0.3: frühere unabhängig erzeugte Kacheln werden nicht automatisch als neue Stilanker verwendet.
+## Neighbor continuation and results
 
-## Grundlagen und Überlappung
+The first tile is rendered from selected map layers immediately before generation. Right and lower neighbors wait for their required predecessors, then render a fresh input that includes their completed neighbors. For a 2 × 2 grid, A1 precedes B1/A2, then B2. Parallel jobs are a maximum; dependency readiness determines actual concurrency. Disconnected selections with multiple starting points are rejected before provider requests.
 
-Vorhandene lokale Raster/GeoTIFFs, Shapefiles, GeoPackages oder über QGIS erreichbare Netzquellen können gemeinsam gewählt werden. Reihenfolge und Darstellung stammen aus QGIS. Der Gebiets-Layer legt nur die rechteckige Gesamtausdehnung fest und muss nicht selbst in den Eingaben vorkommen.
+The internal English base prompt preserves map arrangement, scale, orientation and crop; it is not shown in the interface and imposes no particular colors or illustration medium. At least one style reference or non-whitespace user instruction is required. References alone, instructions alone, and both together are supported.
 
-Eingabegröße: 1024 oder 2048 Pixel. Kontextsaum: einstellbar, für die Weitergabe größer als null. Bei 1024 Pixeln und 128 Pixeln Kontext pro Seite ist der Kern 768 Pixel breit. Nachbareingaben überlappen um 256 Pixel. Es wird das vollständige vorherige Bild benutzt, sodass die geschützte Anschlusszone auch in den neuen Kern hineinreicht.
+**Add images…** accepts multiple files and can be used repeatedly. Every preview has a stable **Reference 1**, **Reference 2**, etc. label and a Remove button. Deleting a reference never renumbers the remaining images; adding an image allocates a fresh number. Duplicate file paths are ignored. Instructions may refer to either `Reference 1` or `Referenz 1`, e.g. “Colors like Reference 1, linework like Reference 3.” Explicit mentions of absent reference numbers are rejected before generation. Without specific instructions, references contribute their shared visual characteristics with no automatic first-image priority.
 
-Randbehandlung: vollständige Abdeckung oder nur vollständig enthaltene Kerne. Der Kontext darf über das gewählte Gebiet hinausgehen. Ergebniszuschnitt am Gebiet ist optional; nach außen wird auf Pixelgrenzen gerundet, ohne die Bilder zu strecken. Der Rand kann dadurch um weniger als einen Pixel überschritten werden.
+The prompt explicitly maps each reference label to its transmitted image position. Image 1 is always the geographic input, followed by all style references in display order, then completed neighbors. Neighbor image numbers are computed from the actual reference count. Starting tiles also work without any style image. Finished connection strips take priority over style requests for continuity; the selected overlap treatment still controls local result processing.
 
-Kern- und Kontextflächen lassen sich als Hilfslayer anzeigen; die Auswahl ist transparent hervorgehoben. **Letztes Live-Eingabebild ansehen** zeigt nach dem ersten Export die tatsächliche Eingabe der gewählten Kachel. Eingabebilder können einzeln als ausgeblendete QGIS-Layer geladen werden.
+There is no fixed reference selection cap in the UI. Provider input-image limits include the map input and the maximum number of required neighbors in the selected run and are checked before starting. OpenAI allows 16 total images; supported current Gemini models allow 14, with Gemini 3 Pro Image allowing up to 3 style references. The existing 20 MB inline Gemini request-size guard runs before each HTTP request. Unknown custom model limits remain subject to the provider response. No images are silently omitted. See [OpenAI image edits](https://developers.openai.com/api/reference/resources/images/methods/edit) and [Google image generation](https://ai.google.dev/gemini-api/docs/image-generation).
 
-**Kachelgröße** gibt die Seitenlänge des quadratischen Kerns in Metern oder Kilometern vor, standardmäßig 1 km. **Gebiet übernehmen und Raster erstellen** übernimmt den Kartenausschnitt oder die Layer-Ausdehnung einmalig. Das Plugin wählt die lokale UTM-Zone (UPS in Polargebieten) und verankert die Kanten an Vielfachen der Seitenlänge ab KBS-Ursprung (0, 0). Vollständige Randkacheln können über das Gebiet hinausragen. Bei gleichem KBS und gleicher Größe bleiben Kanten auch bei einer Gebietserweiterung deckungsgleich; bei Wechsel der UTM-Zone entsteht ein neues Raster. Das Verfahren ist für regionale Gebiete gedacht.
+**Advanced settings → Tile transitions** selects how each new tile joins its finished neighbors:
 
-**Weniger Kacheln** und **Mehr Kacheln** unter der Größenangabe schlagen die nächstgrößere beziehungsweise nächstkleinere passende Seitenlänge vor. Die Buttons zeigen Spalten × Zeilen; der Tooltip zeigt Anzahl und Größe. Für ein Gebiet von 600 × 600 m und eine Eingabe von 400 m ergibt das entweder 1 × 1 mit 600 m oder 2 × 2 mit 300 m. Die Größen werden aus Gebietsbreite/n und Gebietshöhe/n gewählt, sodass mindestens eine Richtung genau passt. Bei Rechtecken kann in der anderen Richtung Überstand bleiben, da die Kacheln quadratisch bleiben. Die Anzeige nennt diesen Überstand in Prozent (Kernflächen, ohne Kontext). Der Klick richtet das Raster an der linken oberen Gebietsecke aus und aktiviert vollständige Abdeckung. Optionaler Ergebniszuschnitt bleibt erhalten. Weitere Klicks wechseln zur jeweils nächsten Größe; die Grenze von 2500 Kacheln gilt weiterhin.
+- **Fade overlap** (default): gradually blends existing neighbor pixels into the new image.
+- **Copy overlap exactly**: restores neighbor pixels exactly in the overlap; the inner edge may remain visible.
+- **Keep AI output**: uses the generated image without copying or fading pixels; visible seams may remain.
 
-Angepasste Raster bleiben bei Navigation, Einheitenwechsel, Bildgröße und Kontext unverändert positioniert. Eine manuell geänderte Kachelgröße kehrt zum festen metrischen Rasterursprung zurück. Neues Übernehmen eines Gebiets setzt die Anpassung zurück. Rasteränderungen wählen wie bisher alle Kacheln aus und setzen Anschlusszuordnungen zurück. Beim Anpassen bleibt der Tab Grundlagen offen, damit beide Vorschläge direkt verglichen werden können.
+A short general explanation and an explanation for the selected option appear in the settings, with additional question-mark help. All modes still supply neighbor context to the AI and crop the outer context margin. The selected mode is recorded per run in the manifest and controls both the visible result and the anchor for subsequent tiles. One result variant is saved and loaded per tile; the untouched provider response is retained separately. Existing results are not reprocessed when the setting changes. Copying protects old pixels exactly; blending softens the transition. Visual continuity in newly generated areas still depends on the provider. Georeferencing cannot correct features moved by AI.
 
-Änderungen an Kachelgröße, Bildgröße, Kontext oder Randbehandlung aktualisieren die Vorschau nach kurzer Pause für das gespeicherte Gebiet. Neu berechnete Raster wählen alle Kacheln aus und setzen die bisherigen Anschlusszuordnungen zurück. Der Wechsel zwischen m und km erhält die physische Länge. Zoomen und Fenstergröße beeinflussen weder Kachelgrenzen noch Exportauflösung. Ein anderes Gebiet ausdrücklich erneut übernehmen. Bei 2 km Kernkante und 1024 Pixeln mit 128 Pixeln Kontext pro Seite ist die Bodenauflösung 2000 / 768 ≈ 2,604 m/Pixel. Mehr Pixel verbessern die rechnerische Auflösung bei unveränderten Kernflächen. Das ist keine garantierte KI-Detailgenauigkeit. Render-DPI sind auf 96 festgelegt. Das Gebiet bleibt während der Panel-Sitzung gespeichert; nach einem Neustart erneut übernehmen. Das Raster ist auf 2500 Kacheln begrenzt. In Rasterquellen bereits eingebrannte Beschriftungen lassen sich nicht durch Abschalten der QGIS-Beschriftung entfernen.
+Each generation creates a separate folder containing `references/reference-N.png`, copied neighbor anchors, live input PNGs/GeoTIFFs, protection masks, original responses, result variants and `manifest.json`. The manifest records grid geometry, dependencies, user instructions, reference labels and files, base prompt version, resolved per-tile prompts, image settings, request timing and per-tile states without credentials. Loading generated results is automatic. Optional live-input layers are hidden initially. External full-size results can be imported for a single selected tile that already has an exported input.
 
-## Anbieter und Zugang
+There are no automatic paid retries. Authentication, quota and rate-limit errors stop further queued requests. Cancel stops local work and pending requests; requests already received by the provider may still incur charges. Each image request has a 30-minute timeout. Resuming old manifests after restarting QGIS is not implemented.
 
-Generierungen senden Eingabebild, Stilreferenz, fertige Nachbarbilder und Prompt an den gewählten Anbieter und werden über dessen API abgerechnet. ChatGPT-/Gemini-Web-Abos ersetzen kein API-Konto mit entsprechender Abrechnung.
+## Providers
 
-| Anbieter | Standard | Weitere bearbeitbare Modell-IDs |
-| --- | --- | --- |
-| Google | `gemini-nano-banana-2.1` | `gemini-3-pro-image`, `gemini-3.1-flash-image` |
-| OpenAI | `gpt-image-2.5-sunburst` | `gpt-image-2.5-flare`, `gpt-image-2` |
+Google Gemini and OpenAI image editing are supported. Model IDs are editable and availability depends on the API account. Web subscriptions do not replace API billing. Official HTTPS endpoints use QGIS networking with manual redirects; TLS checks remain enabled. OpenAI quality is selectable. Requests contain the map input, all selected style references, neighbor images where applicable and the prompt.
 
-Verfügbarkeit hängt vom Konto ab. Die Modell-ID ist bearbeitbar. Gemini wird mit 1:1 und 1K/2K aufgerufen; OpenAI über `/v1/images/edits` mit genauer Pixelgröße. OpenAI-Qualität ist einstellbar. Größere OpenAI-Auflösungen sind teilweise experimentell.
+## Development and installation
 
-API-Keys bleiben nur im Arbeitsspeicher, getrennt nach Anbieter. Sie werden nicht in Manifest, Projekt, Einstellungen oder Logs geschrieben. Feste offizielle HTTPS-Endpunkte, keine automatisch verfolgten Weiterleitungen. QGIS übernimmt Netzwerk-, Proxy- und TLS-Einstellungen. Zertifikatsfehler werden nicht automatisch übergangen.
-
-## Dateien, Abbruch und Grenzen
-
-Jeder Durchlauf legt einen eigenen Ordner an:
-
-```text
-generation-…/
-  reference.png                  # verwendete Stilreferenz
-  neighbors/                     # kopierte Anschlussanker aus vorherigen Durchläufen
-  inputs/B2.png                  # unmittelbar vor B2 exportiertes zusammengesetztes Bild
-  inputs/B2.tif                  # dessen Georeferenzierung
-  inputs/B2-protected.png        # Weiß: geschützte Pixel; Schwarz: neuer Bereich
-  responses/B2.png               # unveränderte Modellantwort
-  results/B2-stitched.png        # Modellantwort mit exakt zurückkopierten Anschlüssen
-  results/…-full.png              # vollständiges korrigiertes Ergebnis
-  results/…-context.tif           # vollständiges Ergebnis als georeferenzierter Anschluss
-  results/…-core.png              # zugeschnittener sichtbarer Kern
-  results/….tif                  # sichtbarer georeferenzierter Ergebnislayer
-  manifest.json                  # Status, Abhängigkeiten, Nachbarn, Prompt, Modell; keine Keys
-```
-
-Das Manifest wird fortlaufend aktualisiert. Enthalten sind sowohl der allgemeine Prompt als auch die tatsächlich pro Kachel versandten Anweisungen und geschützten Pixelrechtecke. GeoTIFFs lassen sich unabhängig vom Plugin laden. Eine Wiederaufnahme alter Manifeste nach einem QGIS-Neustart ist bisher nicht eingebaut. Geladene Rasterlayer durch Speichern des QGIS-Projekts behalten; temporäre Hilfsvektoren bei Bedarf separat speichern.
-
-Falsche Ausgabegrößen werden angezeigt und ohne Verzerren zurückgewiesen; die vollständige Modellantwort bleibt erhalten. API-/Netzwerkfehler erscheinen pro Kachel. Es gibt keine automatischen kostenpflichtigen Wiederholungen. Bei HTTP 401/402/403/429 werden weitere noch nicht versandte Anfragen gestoppt; bereits laufende Anfragen dürfen abschließen.
-
-**Generierung abbrechen** stoppt Warteschlange, lokale Exporte und laufende Downloads. Bereits beim Anbieter eingegangene Anfragen können trotzdem berechnet werden. Eine einzelne API-Anfrage wird nach 30 Minuten lokal abgebrochen.
-
-Die geschützten Pixel sind identisch; eine optisch perfekte Fortsetzung der neu erzeugten Bereiche ist dennoch eine Modellleistung. Die Georeferenzierung korrigiert keine von der KI verschobenen Objekte. Die visuelle Qualität dieses neuen Ablaufs wird durch den Nutzer getestet.
-
-Externe Ergebnisbilder können weiterhin einer Kachel mit bereits vorhandener Live-Eingabe manuell zugeordnet werden; sie müssen dieselbe volle Pixelgröße haben.
-
-## Entwicklung und Installation
-
-Das Plugin ist auf diesem Rechner mit dem Repository verknüpft. In QGIS unter **Erweiterungen → MapStyle AI → MapStyle AI** öffnen.
+- `mapstyle_ai/`: plugin source.
+- `scripts/`, `tests/`: development helpers and offline checks.
+- `docs/`: project documentation.
+- `local/`, `ahrensburg/`, `examples/mapstyle-ai-test/`: ignored personal maps and manual experiments.
+- `dist/`, `test-output/`: ignored packages and test artifacts.
 
 ```sh
 python3 scripts/install.py --profile "$HOME/Library/Application Support/QGIS/QGIS3/profiles/default"
 python3 scripts/package.py
-```
-
-Die ZIP liegt unter `dist/mapstyle_ai-0.4.1.zip` und lässt sich im Erweiterungsmanager unter **Aus ZIP installieren** laden. Das Installationsskript überschreibt keine vorhandene Installation.
-
-Zum Neuladen ohne laufenden Auftrag, unter Beibehaltung von Einstellungen und Schlüsseln im Arbeitsspeicher:
-
-```python
-from pathlib import Path; MAPSTYLE_REPO = '/Users/gormlabenz/Documents/labenz-io/000_Repositorys/mapstyle-ai'; exec((Path(MAPSTYLE_REPO) / 'scripts/reload_preserve.py').read_text())
-```
-
-`dev_load.py` lädt alternativ ohne diese Übernahme neu. Wiederhergestellte Einstellungen starten keine Exporte oder Generierungen.
-
-## Prüfungen dieser Version
-
-```sh
 python3 -m unittest discover -s tests -v
 ```
 
-Für das metrische Raster prüft ein zusätzlicher isolierter QGIS-Lauf Gebiet, Zoom, Fenstergröße, Pixelzahl, Kontext, Einheitenwechsel, verzögerte Rastervorschau und einen georeferenzierten Export mit synthetischen Daten. Keine Anbieteraufrufe und keine Änderung am geöffneten QGIS-Projekt:
+The install script refuses to overwrite an existing installation. The installable ZIP is `dist/mapstyle_ai-0.6.0.zip`.
+
+Offline QGIS checks on this Mac:
 
 ```sh
 QT_QPA_PLATFORM=offscreen PYTHONPATH=/Applications/QGIS.app/Contents/Resources/python /Applications/QGIS.app/Contents/MacOS/python scripts/qgis_metric_grid_check.py
+QT_QPA_PLATFORM=offscreen PYTHONPATH=/Applications/QGIS.app/Contents/Resources/python /Applications/QGIS.app/Contents/MacOS/python scripts/qgis_compact_ui_check.py
+QT_QPA_PLATFORM=offscreen PYTHONPATH=/Applications/QGIS.app/Contents/Resources/python /Applications/QGIS.app/Contents/MacOS/python scripts/qgis_reference_check.py
+QT_QPA_PLATFORM=offscreen PYTHONPATH=/Applications/QGIS.app/Contents/Resources/python /Applications/QGIS.app/Contents/MacOS/python scripts/qgis_result_variants_check.py
 ```
 
-Die lokalen Tests prüfen Geometrie, Pixelüberlappung, diagonale Freigabe, Abhängigkeiten, getrennte Auswahlen, Fehlerfortpflanzung und die Bildreihenfolge beider API-Formate. Dabei werden keine API-Anfragen versandt.
+These isolated checks use synthetic data and make no provider calls. They cover metric geometry and export, actual overview interactions, area modes, fitting, selection, overlay visibility, help, collapsed defaults, temporary/custom output, simulated generation launch/cancel and all three transition modes. A real paid generation is left to the user. Legacy smoke scripts for the original workflow are not current verification paths.
 
-**In QGIS wurde genau ein zusammengesetztes Eingabebild exportiert, ohne Generierungsaufruf.** `scripts/qgis_live_export_once.py` verwendet rein synthetische Nachbarn und verändert das Projekt nicht. Der Test prüft Georeferenzierung, Eckpriorität, Schutzmaske und pixelgenaues Zurückkopieren. Bericht: `test-output/live-export-once/validation.json`.
+To reload an idle plugin in the QGIS console while retaining selections and credentials in memory:
 
-Die älteren Smoke-Skripte für die frühere unabhängige Generierung sind kein Testablauf für Version 0.3 und wurden bei dieser Änderung nicht ausgeführt. Der eigentliche KI-Test wird vom Nutzer gestartet.
+```python
+from pathlib import Path
+MAPSTYLE_REPO = '/Users/gormlabenz/Documents/labenz-io/000_Repositorys/mapstyle-ai'
+exec((Path(MAPSTYLE_REPO) / 'scripts/reload_preserve.py').read_text())
+```
 
-## Quellen
-
-- [QGIS 3.44: Kartenrendering](https://docs.qgis.org/3.44/en/docs/pyqgis_developer_cookbook/composer.html)
-- [QGIS 3.44: QgsMapSettings](https://api.qgis.org/api/3.44/classQgsMapSettings.html)
-- [OpenAI: Bildbearbeitung mit Referenzen](https://developers.openai.com/api/docs/guides/image-generation)
-- [Google: Bildgenerierung](https://ai.google.dev/gemini-api/docs/generate-content/image-generation)
-
-### Timeout-Korrektur in 0.3.1
-
-Qt-Transferlimit, QGIS-Inaktivitätstimer der einzelnen Bildanfrage und Plugin-Gesamtlimit betragen 30 Minuten. Das globale QGIS-Netzwerk-Timeout bleibt unverändert. QGIS 3.44 verwendet zusätzlich zu Qt einen eigenen Timer namens `timeoutTimer`; dieser wird nur an der jeweiligen API-Antwort angepasst. Start-/Fehlerzeitpunkte und das Zeitlimit werden im Manifest protokolliert; Netzwerkfehler enthalten die verstrichene Dauer.
+Reloading starts no rendering or provider requests. It preserves temporary storage paths, tile selection, source choices, existing result associations and user-edited prompts. The previous single reference migrates to Reference 1; an unchanged previous default prompt migrates to an empty user field. Existing custom text is retained. Reloading preserves reference numbers and the next available number.

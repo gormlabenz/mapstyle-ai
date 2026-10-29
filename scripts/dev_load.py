@@ -20,9 +20,9 @@ if repo not in qgis.utils.plugin_paths:
     qgis.utils.plugin_paths.append(repo)
 qgis.utils.updateAvailablePlugins()
 if not qgis.utils.loadPlugin('mapstyle_ai'):
-    raise RuntimeError('Plugin konnte nicht geladen werden; QGIS-Protokoll prüfen.')
+    raise RuntimeError('Could not load plugin; check the QGIS log.')
 if not qgis.utils.startPlugin('mapstyle_ai'):
-    raise RuntimeError('Plugin konnte nicht gestartet werden; QGIS-Protokoll prüfen.')
+    raise RuntimeError('Could not start plugin; check the QGIS log.')
 plugin = qgis.utils.plugins['mapstyle_ai']
 plugin.show()
-print('MapStyle AI geladen: ' + repo)
+print('MapStyle AI loaded: ' + repo)

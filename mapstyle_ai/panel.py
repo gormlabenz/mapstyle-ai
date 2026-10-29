@@ -2,30 +2,47 @@
 from datetime import datetime
 from pathlib import Path
 import shutil
+import tempfile
 import uuid
 
-from qgis.PyQt.QtCore import Qt, QSize, QTimer
+from qgis.PyQt.QtCore import Qt, QSize, QTimer, QPoint, QLocale, QEvent
 from qgis.PyQt.QtGui import QColor, QImage, QPixmap
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDialog, QDockWidget,
-    QDoubleSpinBox, QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+    QDoubleSpinBox, QFileDialog, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMessageBox, QPlainTextEdit, QProgressBar,
-    QPushButton, QScrollArea, QSpinBox, QTabWidget, QTableWidget,
+    QPushButton, QScrollArea, QSpinBox, QTableWidget, QToolButton, QWhatsThis,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qgis.core import (
-    Qgis, QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsFeature, QgsFillSymbol, QgsGeometry,
+    Qgis, QgsApplication, QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsFeature, QgsFillSymbol, QgsGeometry,
     QgsMapLayerStyle, QgsMapSettings, QgsProject, QgsRasterLayer,
     QgsRectangle, QgsVectorLayer,
 )
+
+from qgis.gui import QgsCollapsibleGroupBox
 
 from .exporter import write_geotiff, write_json
 from .grid import build_grid, column_name, crop_window, fitted_size
 from .generation import image_png, DEFAULT_TIMEOUT_MS
 from .seam_run import SeamlessRun
-from .seams import DEFAULT_PROMPT, dependencies, continuation_prompt
+from .seams import dependencies, continuation_prompt
+from .prompts import PROMPT_VERSION, build_prompt, validate_style
 from .live_export import copy_regions, blend_regions
-from .providers import GOOGLE, OPENAI, MODELS, validate_options, safe_error
+from .providers import GOOGLE, OPENAI, MODELS, validate_options, validate_image_count, safe_error
+
+
+OVERLAP_MODES = {
+    'blend': ('Fade overlap',
+              'Gradually blend the finished neighbor into the new image for a softer transition.',
+              'Blended overlap'),
+    'copy': ('Copy overlap exactly',
+             'Replace the overlap with the finished neighbor pixels exactly. The inner edge may remain visible.',
+             'Overlap restored'),
+    'original': ('Keep AI output',
+                 'Use the generated image without copying or fading neighbor pixels. Visible seams may remain.',
+                 'AI original'),
+}
 
 
 def rect_tuple(rect):
@@ -44,10 +61,102 @@ def button(text, callback):
     return widget
 
 
+def help_button(title, explanation, parent=None):
+    widget = QToolButton(parent)
+    widget.setText('?')
+    widget.setAutoRaise(True)
+    widget.setFixedSize(24, 24)
+    widget.setAccessibleName('Help: ' + title)
+    widget.setToolTip(explanation)
+    widget.clicked.connect(lambda: QWhatsThis.showText(
+        widget.mapToGlobal(QPoint(0, widget.height())), explanation, widget))
+    return widget
+
+
+def field_label(title, explanation):
+    label = QLabel(title)
+    label.setProperty('helpText', explanation)
+    return label
+
+
+class FieldForm(QGridLayout):
+    """Label, expanding input and fixed-width help columns."""
+    def __init__(self):
+        super().__init__()
+        self.setColumnStretch(1, 1)
+        self.setColumnMinimumWidth(2, 24)
+        self.setHorizontalSpacing(8)
+        self.setVerticalSpacing(6)
+
+    def addRow(self, label, field):
+        row = self.rowCount()
+        explanation = label.property('helpText') if isinstance(label, QLabel) else None
+        if isinstance(label, QToolButton):
+            # Checkbox rows use their own text as the label.
+            self.addWidget(field, row, 0, 1, 2)
+            self.addWidget(label, row, 2, Qt.AlignVCenter)
+            return
+        if isinstance(label, str):
+            label = QLabel(label)
+        self.addWidget(label, row, 0, Qt.AlignVCenter)
+        if isinstance(field, QWidget):
+            self.addWidget(field, row, 1)
+        else:
+            self.addLayout(field, row, 1)
+        if explanation:
+            label.help = help_button(label.text(), explanation)
+            self.addWidget(label.help, row, 2, Qt.AlignVCenter)
+
+
+class TileSizeInput(QDoubleSpinBox):
+    def textFromValue(self, value):
+        return self.locale().toString(value, 'f', self.decimals()).rstrip('0').rstrip(self.locale().decimalPoint())
+
+
+class HelpSection(QgsCollapsibleGroupBox):
+    """Native collapsible section with accessible help and optional refresh."""
+    def __init__(self, title, explanation, parent=None, refresh=None):
+        super().__init__(title, parent)
+        self.setSaveCollapsedState(False)
+        self.help = help_button(title, explanation, self)
+        self.help.installEventFilter(self)
+        self.refresh = None
+        if refresh:
+            self.refresh = QToolButton(self)
+            self.refresh.setAutoRaise(True)
+            self.refresh.setFixedSize(24, 24)
+            self.refresh.setIcon(QgsApplication.getThemeIcon('/mActionRefresh.svg'))
+            self.refresh.setToolTip('Refresh project layers')
+            self.refresh.setAccessibleName('Refresh project layers')
+            self.refresh.clicked.connect(refresh)
+            self.refresh.installEventFilter(self)
+        self.collapsedStateChanged.connect(lambda *args: QTimer.singleShot(0, self._show_header_controls))
+
+    def eventFilter(self, watched, event):
+        # QGIS also hides non-layout children when a collapsed parent changes.
+        # Header controls must remain available above the collapsed content.
+        if event.type() == QEvent.Hide and watched in (self.help, self.refresh) and self.isVisible():
+            QTimer.singleShot(0, self._show_header_controls)
+        return super().eventFilter(watched, event)
+
+    def _show_header_controls(self, *args):
+        self.help.show()
+        if self.refresh:
+            self.refresh.show()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._show_header_controls()
+        self.help.move(self.width() - 30, 0)
+        if self.refresh:
+            self.refresh.move(self.width() - 56, 0)
+
+
 class BackgroundPanel(QDockWidget):
     def __init__(self, iface):
         super().__init__('MapStyle AI', iface.mainWindow())
         self.setObjectName('MapStyleAIDock')
+        self.setLocale(QLocale(QLocale.English))
         self.setMinimumWidth(420)
         self.iface = iface
         self.project = QgsProject.instance()
@@ -65,6 +174,7 @@ class BackgroundPanel(QDockWidget):
         self.generation_manifest = None
         self._models = {}
         self.last_directory = None
+        self._temporary_output = None
         self.run_group = None
         self._keys = {}
         self._provider = GOOGLE
@@ -82,57 +192,65 @@ class BackgroundPanel(QDockWidget):
 
     def _build_ui(self):
         root = QWidget()
-        layout = QVBoxLayout(root)
+        self.overview = QVBoxLayout(root)
+        heading = QHBoxLayout()
         title = QLabel('MapStyle AI')
         title.setStyleSheet('font-size: 20px; font-weight: 600;')
-        layout.addWidget(title)
-        layout.addWidget(text_label('Kartenhintergründe aus deinen Grundlagen und einem austauschbaren Referenzbild erzeugen.'))
-        self.tabs = QTabWidget()
-        layout.addWidget(self.tabs, 1)
-        self._sources_tab()
-        self._grid_tab()
-        self._generation_tab()
-        self._results_tab()
-        self.progress = QProgressBar()
-        self.progress.setValue(0)
-        layout.addWidget(self.progress)
-        self.stop_button = button('Generierung abbrechen', self.cancel_generation)
-        self.stop_button.setEnabled(False)
-        layout.addWidget(self.stop_button)
-        self.message = text_label('1. Grundlagen wählen → 2. Kacheln auswählen → 3. Live-Generierung starten')
-        layout.addWidget(self.message)
-        self.log = QPlainTextEdit()
-        self.log.setReadOnly(True)
-        self.log.setMaximumHeight(80)
-        self.log.setPlaceholderText('Export- und Fehlermeldungen')
-        layout.addWidget(self.log)
-        self.setWidget(root)
-
-    def _tab(self, title):
-        content = QWidget()
-        layout = QVBoxLayout(content)
+        heading.addWidget(title)
+        heading.addStretch()
+        heading.addWidget(help_button('MapStyle AI',
+            'Create illustrated, georeferenced map backgrounds from your QGIS layers. '
+            'Choose input layers, set an area, select tiles and add style references or describe your desired style. '
+            'Generation sends the selected map images, reference and prompt to your provider and uses paid API credits. '
+            'API keys stay in memory for this session. Generated results appear as QGIS layers.'))
+        self.overview.addLayout(heading)
+        self._sources_section()
+        self._tiles_section()
+        self._generation_section()
+        self._advanced_section()
+        self.overview.addStretch()
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setWidget(content)
-        self.tabs.addTab(scroll, title)
-        return content, layout
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setWidget(root)
+        self.setWidget(scroll)
+        self._area_visibility()
 
-    def _sources_tab(self):
-        self.source_page, layout = self._tab('1 · Grundlagen')
-        layout.addWidget(text_label('Bereits im Projekt geladene Raster- und Vektorlayer auswählen. Reihenfolge und Gestaltung werden aus QGIS übernommen.'))
-        layout.addWidget(button('Projektlayer aktualisieren', self.refresh_layers))
+    def _section(self, title, explanation, collapsed=False, parent_layout=None, refresh=None):
+        section = HelpSection(title, explanation, refresh=refresh)
+        layout = QVBoxLayout(section)
+        layout.setContentsMargins(10, 12, 10, 10)
+        section.setCollapsed(collapsed)
+        (parent_layout if parent_layout is not None else self.overview).addWidget(section)
+        return section, layout
+
+    def _sources_section(self):
+        self.source_page, layout = self._section('Input layers',
+            'Select the input layers for AI image generation. These layers are rendered into map images and sent '
+            'as spatial references to your selected AI provider: OpenAI (the provider of ChatGPT) or Google Gemini. '
+            'The AI uses these images to generate the output map layers, guided by your style reference and prompt. '
+            'QGIS layer order and styling are preserved. '
+            'Labels and selection highlights are excluded; text embedded in raster images remains visible.',
+            refresh=self.refresh_layers)
         self.layers = QListWidget()
-        self.layers.setMinimumHeight(160)
-        self.layers.setToolTip('Oben liegende Layer werden auch im Eingabebild oben gezeichnet. Verborgene Layer können hier ebenfalls ausgewählt werden.')
+        self.layers.setMinimumHeight(90)
+        self.layers.setMaximumHeight(150)
+        self.layers.setToolTip('Selected layers form the map images sent to the AI provider as input for generation.')
         layout.addWidget(self.layers)
-        form = QFormLayout()
+        self.area_page, layout = self._section('Area and tiles',
+            'The area is stored in map coordinates. Zooming or resizing the map does not change it. '
+            'Tile size is the side length of a square tile, independent of image pixels and overlap.')
+        form = FieldForm()
         self.area = QComboBox()
-        self.area.addItems(['Sichtbarer Kartenausschnitt', 'Ausdehnung eines Layers'])
-        form.addRow('Gebiet', self.area)
+        self.area.addItems(['Current map view', 'Layer extent'])
+        form.addRow(field_label('Area', 'Capture the current map view, or use the rectangular extent of a project layer.'), self.area)
+        self.build_button = button('Set area', self.capture_area)
+        form.addRow('', self.build_button)
         self.area_layer = QComboBox()
-        self.area_layer.setEnabled(False)
-        form.addRow('Gebiets-Layer', self.area_layer)
-        self.tile_size = QDoubleSpinBox()
+        self.area_layer_label = field_label('Area layer',
+            'Selecting a layer sets the area to its bounding rectangle. This layer does not have to be included in the input image.')
+        form.addRow(self.area_layer_label, self.area_layer)
+        self.tile_size = TileSizeInput()
         self.tile_size.setDecimals(6)
         self.tile_size.setRange(0.000001, 1000000)
         self.tile_size.setValue(1)
@@ -142,161 +260,204 @@ class BackgroundPanel(QDockWidget):
         self.tile_unit.addItem('km', 1000)
         self.tile_unit.setCurrentIndex(1)
         size_row = QHBoxLayout()
-        size_row.addWidget(self.tile_size)
+        size_row.addWidget(self.tile_size, 1)
         size_row.addWidget(self.tile_unit)
-        form.addRow('Kachelgröße', size_row)
-        self.tile_size.setToolTip('Seitenlänge des quadratischen Kerns. Bildgröße und Kontext ändern diese Länge nicht.')
+        form.addRow(field_label('Tile size',
+            'The side length of each square tile. Fewer tiles increases the size; more tiles decreases it. '
+            'Both buttons fit the grid to your area. Rectangular areas may retain some overhang.'), size_row)
         fit_row = QHBoxLayout()
-        self.fewer_tiles = button('Weniger Kacheln', lambda: self.fit_tiles(True))
-        self.more_tiles = button('Mehr Kacheln', lambda: self.fit_tiles(False))
-        fit_row.addWidget(self.fewer_tiles)
-        fit_row.addWidget(self.more_tiles)
-        form.addRow(fit_row)
-        self.fit_hint = text_label('Zuerst Gebiet übernehmen, dann Kacheln passend verteilen.')
-        form.addRow(self.fit_hint)
+        self.fewer_tiles = button('Fewer tiles', lambda: self.fit_tiles(True))
+        self.more_tiles = button('More tiles', lambda: self.fit_tiles(False))
+        fit_row.addWidget(self.fewer_tiles, 1)
+        fit_row.addWidget(self.more_tiles, 1)
+        form.addRow('', fit_row)
         self._update_fit_buttons()
-        self.border = QComboBox()
-        self.border.addItems(['Vollständig abdecken', 'Nur vollständig enthaltene Kacheln'])
-        form.addRow('Randbehandlung', self.border)
-        self.pixels = QComboBox()
-        for size in (1024, 2048):
-            self.pixels.addItem(f'{size} × {size} Pixel', size)
-        form.addRow('Bildgröße inkl. Kontext', self.pixels)
-        self.halo = QSpinBox()
-        self.halo.setRange(0, 1008)
-        self.halo.setSingleStep(16)
-        self.halo.setValue(128)
-        self.halo.setSuffix(' px pro Seite')
-        form.addRow('Kontextsaum', self.halo)
-        self.clip = QCheckBox('Ergebnis am gewählten Gebiet zuschneiden')
-        self.clip.setChecked(True)
-        form.addRow(self.clip)
         layout.addLayout(form)
-        layout.addWidget(text_label('Das Gebiet wird einmal übernommen. Kachelgröße in Metern oder Kilometern, Bildgröße und Kontext sind unabhängig vom Bildschirmzoom. „Weniger Kacheln“ und „Mehr Kacheln“ passen Größe und Rasterposition an das Gebiet an. Quadratische Kacheln bleiben erhalten; bei länglichen Gebieten kann ein Restüberstand bleiben. Das Raster verwendet ein lokales UTM-KBS (in Polargebieten UPS). Randkacheln behalten ihre volle Größe. Nordausrichtung erforderlich. Native QGIS-Beschriftungen und Auswahlmarkierungen werden nicht exportiert; eingebrannte Texte bleiben sichtbar.'))
-        self.build_button = button('Gebiet übernehmen und Raster erstellen', self.capture_area)
-        layout.addWidget(self.build_button)
-        self.plan_hint = text_label('Noch kein Raster erstellt.')
-        layout.addWidget(self.plan_hint)
-        layout.addStretch()
         self.area.currentIndexChanged.connect(self._area_changed)
         self.area_layer.currentIndexChanged.connect(self._area_changed)
-        self.border.currentIndexChanged.connect(self._grid_changed)
-        self.pixels.currentIndexChanged.connect(self._grid_changed)
-        self.halo.valueChanged.connect(self._grid_changed)
         self.tile_size.valueChanged.connect(self._size_changed)
         self.tile_unit.currentIndexChanged.connect(self._unit_changed)
-        self.layers.itemChanged.connect(self._invalidate)
+        self.layers.itemChanged.connect(self._sources_changed)
 
-    def _grid_tab(self):
-        _, layout = self._tab('2 · Kacheln')
-        self.summary = text_label('Erstelle zunächst ein Raster im Tab Grundlagen.')
-        layout.addWidget(self.summary)
-        row = QHBoxLayout()
-        row.addWidget(button('Alle', self.select_all))
-        row.addWidget(button('Keine', self.select_none))
-        row.addWidget(button('Offene', self.select_pending))
-        row.addWidget(button('2 × 2 links oben', self.select_first_four))
-        layout.addLayout(row)
+    def _tiles_section(self):
+        self.tiles_page, layout = self._section('Tiles',
+            'Green tiles are selected for generation. Click a tile to toggle it; drag to select a range. '
+            'All tiles start selected. Completed, running and failed tiles show their status.', collapsed=True)
         self.table = QTableWidget()
-        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.table.setSelectionMode(QAbstractItemView.MultiSelection)
         self.table.setSelectionBehavior(QAbstractItemView.SelectItems)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Fixed)
-        self.table.horizontalHeader().setDefaultSectionSize(94)
-        self.table.verticalHeader().setDefaultSectionSize(64)
-        self.table.setMinimumHeight(250)
-        self.table.setToolTip('Ziehen oder Umschalt-Klick für einen Bereich. Cmd/Strg-Klick für einzelne weitere Kacheln.')
+        self.table.horizontalHeader().setDefaultSectionSize(78)
+        self.table.verticalHeader().setDefaultSectionSize(50)
+        self.table.setMinimumHeight(160)
+        self.table.setMaximumHeight(300)
+        self.table.setStyleSheet('QTableWidget::item:selected { background: #ccebd8; color: #16452d; }')
+        self.table.setToolTip('Click to select or deselect a tile. Green tiles will be generated.')
         self.table.itemSelectionChanged.connect(self._selection_changed)
-        layout.addWidget(self.table, 1)
-        self.selection_label = text_label('0 Kacheln ausgewählt')
-        layout.addWidget(self.selection_label)
-        self.show_overlap = QCheckBox('Kontextflächen auf der Karte anzeigen')
-        self.show_overlap.toggled.connect(self._overlap_visibility)
-        layout.addWidget(self.show_overlap)
-        layout.addWidget(text_label('Blau: verwendeter Kern · Orange: Eingabe inklusive Kontext. Kachelauswahl wird auf der Karte hervorgehoben.'))
+        layout.addWidget(self.table)
+        self.show_frames = QCheckBox('Show tile outlines on map')
+        self.show_frames.setChecked(True)
+        self.show_frames.toggled.connect(self._grid_visibility)
+        layout.addWidget(self.show_frames)
         self.output = QLineEdit()
-        self.output.setPlaceholderText('Ordner für Exporte wählen …')
+        self.output.setPlaceholderText('Temporary files')
+        self.output.setToolTip('Leave empty for temporary storage. Choose a folder to keep generation files permanently.')
         row = QHBoxLayout()
         row.addWidget(self.output, 1)
-        row.addWidget(button('Ordner …', self.choose_output))
-        layout.addLayout(row)
-        self.load_inputs = QCheckBox('Live-Eingabebilder als QGIS-Layer laden')
-        self.load_inputs.setChecked(True)
-        layout.addWidget(self.load_inputs)
-        layout.addWidget(text_label('Hier werden nur Kacheln ausgewählt. Eingabebilder werden erst während der Generierung exportiert, sobald die benötigten Nachbarn fertig sind.'))
-        self.preview_button = button('Letztes Live-Eingabebild ansehen', self.preview_input)
-        layout.addWidget(self.preview_button)
+        row.addWidget(button('Browse…', self.choose_output))
+        clear = QToolButton()
+        clear.setText('↺')
+        clear.setAccessibleName('Use temporary storage')
+        clear.setToolTip('Use temporary storage')
+        clear.clicked.connect(self.output.clear)
+        row.addWidget(clear)
+        form = FieldForm()
+        form.addRow(field_label('Save to',
+            'Temporary files are stored in the system temporary directory. They are needed for QGIS result layers '
+            'and may be removed by the system later. Choose a folder to keep the files for future use.'), row)
+        layout.addLayout(form)
 
-    def _generation_tab(self):
-        self.generation_page, layout = self._tab('3 · Generierung')
-        notice = text_label('Beim Start werden die ausgewählten Grundlagenkacheln, das Referenzbild und der Prompt an den gewählten Anbieter übertragen. Generierungen werden über dessen API abgerechnet. Jede Eingabe wird unmittelbar vor der Generierung mit fertigen Nachbarn exportiert. Nach A1 folgen B1 und A2, danach B2.')
-        notice.setStyleSheet('background: #fff1d6; color: #593c00; padding: 10px; border-radius: 4px;')
-        layout.addWidget(notice)
-        form = QFormLayout()
+    def _generation_section(self):
+        self.generation_page, layout = self._section('Generation',
+            'Each selected tile is rendered immediately before generation, using completed neighbors for continuity. '
+            'Images and prompts are sent to the selected provider and charged to your API account. '
+            'Results are georeferenced, but AI may still move or alter map details.')
+        self.provider_page, provider_layout = self._section('Provider settings',
+            'These settings apply to all tiles. API keys are kept only in memory and are never saved in the project or generation files.',
+            collapsed=True, parent_layout=layout)
+        form = FieldForm()
         self.provider = QComboBox()
         self.provider.addItems([GOOGLE, OPENAI])
-        form.addRow('Anbieter', self.provider)
-        self.model = QLineEdit()
-        self.model.setText(MODELS[GOOGLE][0])
-        self.model.setToolTip('Weitere Modelle: ' + ', '.join(MODELS[GOOGLE][1:]))
-        form.addRow('Modell-ID', self.model)
+        form.addRow('Provider', self.provider)
+        self.model = QLineEdit(MODELS[GOOGLE][0])
+        self.model.setToolTip('Other models: ' + ', '.join(MODELS[GOOGLE][1:]))
+        form.addRow(field_label('Model ID', 'Enter an image model available to your API account.'), self.model)
         self.quality = QComboBox()
         self.quality.addItems(['auto', 'low', 'medium', 'high'])
         self.quality.setEnabled(False)
-        form.addRow('Qualität (OpenAI)', self.quality)
+        form.addRow(field_label('Quality', 'OpenAI image quality. Higher quality can increase generation time and cost.'), self.quality)
         self.key = QLineEdit()
         self.key.setEchoMode(QLineEdit.Password)
-        self.key.setPlaceholderText('API-Key · nur für diese Sitzung')
-        form.addRow('API-Key', self.key)
-        self.show_key = QCheckBox('Schlüssel anzeigen')
-        form.addRow(self.show_key)
+        self.key.setPlaceholderText('API key · this session only')
+        form.addRow('API key', self.key)
+        self.show_key = QCheckBox('Show key')
+        form.addRow('', self.show_key)
         self.concurrent = QSpinBox()
         self.concurrent.setRange(1, 16)
         self.concurrent.setValue(3)
-        form.addRow('Gleichzeitige Generierungen', self.concurrent)
-        self.reference = QLineEdit()
-        self.reference.setPlaceholderText('Stilreferenz auswählen …')
-        ref_row = QHBoxLayout()
-        ref_row.addWidget(self.reference)
-        ref_row.addWidget(button('Bild …', self.choose_reference))
-        form.addRow('Referenzbild', ref_row)
+        form.addRow(field_label('Parallel jobs', 'Maximum simultaneous requests. Tiles wait until their required neighbors are complete.'), self.concurrent)
+        provider_layout.addLayout(form)
+        form = FieldForm()
+        self.pixels = QComboBox()
+        for size in (1024, 2048):
+            self.pixels.addItem(f'{size} × {size} px', size)
+        form.addRow(field_label('Generated Tile Size',
+            'Full generated image size in pixels, including context on all sides. '
+            'The final map tile excludes the context margin.'), self.pixels)
         layout.addLayout(form)
-        layout.addWidget(text_label('API-Keys bleiben nur im Arbeitsspeicher des Panels. Sie werden weder im QGIS-Projekt noch in Exporten oder Einstellungen gespeichert.'))
-        self.reference_preview = QLabel('Noch kein Referenzbild gewählt')
-        self.reference_preview.setAlignment(Qt.AlignCenter)
-        self.reference_preview.setMinimumHeight(100)
-        self.reference_preview.setMaximumHeight(160)
-        layout.addWidget(self.reference_preview)
-        layout.addWidget(QLabel('Prompt · vor jedem Auftrag bearbeitbar'))
-        self.prompt = QPlainTextEdit(DEFAULT_PROMPT)
-        self.prompt.setMinimumHeight(230)
-        layout.addWidget(self.prompt, 1)
-        layout.addWidget(text_label('Platzhalter: {tile_px}, {core_px}, {halo_px}. Nur diese werden beim Export ersetzt.'))
-        layout.addWidget(button('Standardprompt wiederherstellen', self.reset_prompt))
-        self.generate_button = button('Ausgewählte Kacheln generieren', self.generate_selected)
+        self.references = []
+        self._next_reference_id = 1
+        self.reference_button = button('Add images…', self.choose_reference)
+        reference_row = QHBoxLayout()
+        reference_row.addWidget(QLabel('Style references (optional)'))
+        reference_row.addStretch()
+        reference_row.addWidget(self.reference_button)
+        layout.addLayout(reference_row)
+        self.reference_list = QListWidget()
+        self.reference_list.setMinimumHeight(110)
+        self.reference_list.setMaximumHeight(280)
+        self.reference_list.hide()
+        layout.addWidget(self.reference_list)
+        self.prompt = QPlainTextEdit()
+        self.prompt.setPlaceholderText(
+            'Describe your desired style or add image-specific instructions, e.g.: '
+            'Colors like Reference 1, linework like Reference 2. You can also write Referenz 1.')
+        layout.addWidget(QLabel('Your instructions (optional)'))
+        self.prompt.setMinimumHeight(100)
+        self.prompt.setMaximumHeight(180)
+        layout.addWidget(self.prompt)
+        self.generate_button = button('Generate selected tiles', self.generate_selected)
         self.generate_button.setEnabled(False)
         layout.addWidget(self.generate_button)
+        self.progress = QProgressBar()
+        self.progress.setValue(0)
+        layout.addWidget(self.progress)
+        self.stop_button = button('Cancel generation', self.cancel_generation)
+        self.stop_button.setEnabled(False)
+        self.stop_button.hide()
+        layout.addWidget(self.stop_button)
         self.provider.currentTextChanged.connect(self._provider_changed)
         self.show_key.toggled.connect(lambda visible: self.key.setEchoMode(QLineEdit.Normal if visible else QLineEdit.Password))
-        self.reference.editingFinished.connect(self._reference_preview)
-        self.reference.textChanged.connect(self._update_generate)
         self.key.textChanged.connect(self._update_generate)
         self.model.textChanged.connect(self._update_generate)
         self.prompt.textChanged.connect(self._update_generate)
 
-    def _results_tab(self):
-        _, layout = self._tab('4 · Ergebnisse')
-        layout.addWidget(text_label('Generierte Bilder erscheinen automatisch als georeferenzierte Layer. Extern erzeugte Bilder kannst du weiterhin manuell einer exportierten Kachel zuordnen.'))
-        layout.addWidget(text_label('Wähle im Kachelraster genau eine exportierte Kachel aus. Das Ergebnisbild muss dieselbe Pixelgröße wie deren Eingabebild haben. Kontextsaum und optional der Gebietsrand werden abgeschnitten.'))
-        self.import_button = button('Ergebnisbild für ausgewählte Kachel laden …', self.import_result)
+    def _advanced_section(self):
+        self.advanced_page, layout = self._section('Advanced settings',
+            'Edge handling and context affect rendering and continuity. '
+            'Geographic tile size remains independent of image resolution.', collapsed=True)
+        form = FieldForm()
+        self.border = QComboBox()
+        self.border.addItems(['Cover entire area', 'Only fully contained tiles'])
+        form.addRow(field_label('Edge tiles', 'Cover the entire area with full-size tiles, or include only tiles entirely inside the area.'), self.border)
+        self.halo = QSpinBox()
+        self.halo.setRange(0, 1008)
+        self.halo.setSingleStep(16)
+        self.halo.setValue(128)
+        self.halo.setSuffix(' px per side')
+        form.addRow(field_label('Context margin',
+            'Extra pixels around each tile, used to connect neighboring images. The final tile excludes this margin. '
+            'With 1024 px and a 128 px margin per side, the usable core is 768 px. Must be less than half the image size.'), self.halo)
+        self.clip = QCheckBox('Crop results to area')
+        self.clip.setChecked(True)
+        form.addRow(help_button('Crop results to area',
+            'Trim overhanging outer tiles to the selected area. Tile images are cropped, never stretched. '
+            'Edges may extend by less than one pixel to preserve georeferencing.'), self.clip)
+        self.show_overlap = QCheckBox('Show context areas on map')
+        self.show_overlap.toggled.connect(self._grid_visibility)
+        form.addRow(help_button('Context areas',
+            'Show the full input extents including overlap. Visible only while tile outlines are enabled.'), self.show_overlap)
+        self.load_inputs = QCheckBox('Load live inputs as QGIS layers')
+        form.addRow(help_button('Live input layers',
+            'Add the actual images sent to the provider as hidden QGIS layers for inspection.'), self.load_inputs)
+        layout.addLayout(form)
+        _, transition_layout = self._section('Tile transitions',
+            'Neighboring images share an overlap. Choose how the generated result uses the finished neighbor pixels. '
+            'All modes still send neighbor context to the AI and crop the outer context margin. '
+            'This setting applies to new generations and to the image used by subsequent tiles.',
+            parent_layout=layout)
+        transition_layout.addWidget(text_label('Choose how neighboring tiles are joined.'))
+        self.overlap_mode = QComboBox()
+        for mode, (label, explanation, variant) in OVERLAP_MODES.items():
+            self.overlap_mode.addItem(label, mode)
+            self.overlap_mode.setItemData(self.overlap_mode.count() - 1, explanation, Qt.ToolTipRole)
+        transition_layout.addWidget(self.overlap_mode)
+        self.overlap_description = text_label('')
+        transition_layout.addWidget(self.overlap_description)
+        self.overlap_mode.currentIndexChanged.connect(self._overlap_mode_changed)
+        self._overlap_mode_changed()
+        self.preview_button = button('Preview latest input', self.preview_input)
+        layout.addWidget(self.preview_button)
+        self.import_button = button('Import result for selected tile…', self.import_result)
+        self.import_button.setToolTip('Select exactly one tile with an exported input. The image must match the full input size.')
         layout.addWidget(self.import_button)
-        layout.addWidget(text_label('Das Ergebnis wird als GeoTIFF gespeichert und in einer eigenen Layergruppe geladen. Die räumliche Zuordnung korrigiert keine durch die KI verschobenen Gebäude oder Straßen.'))
-        self.results = QListWidget()
-        layout.addWidget(self.results, 1)
-        layout.addWidget(text_label('Pro Generierung entsteht ein eigener Laufordner mit PNG-Eingaben, GeoTIFFs und manifest.json. Referenz, Prompt, Raster und Auswahl werden darin dokumentiert. API-Keys sind ausgeschlossen.'))
+        self.log_page, log_layout = self._section('Log',
+            'Rendering, generation progress and errors. API keys are excluded.', collapsed=True, parent_layout=layout)
+        self.log = QPlainTextEdit()
+        self.log.setReadOnly(True)
+        self.log.setMinimumHeight(140)
+        self.log.setMaximumBlockCount(2000)
+        self.log.setPlaceholderText('Activity and errors')
+        log_layout.addWidget(self.log)
+        self.border.currentIndexChanged.connect(self._grid_changed)
+        self.pixels.currentIndexChanged.connect(self._grid_changed)
+        self.halo.valueChanged.connect(self._grid_changed)
+
+    def _overlap_mode_changed(self, *args):
+        self.overlap_description.setText(OVERLAP_MODES[self.overlap_mode.currentData()][1])
 
     def _tell(self, message, error=False):
-        self.message.setText(message)
         self.log.appendPlainText(message)
         if error and not getattr(self, '_suppress_notifications', False):
             self.iface.messageBar().pushWarning('MapStyle AI', message)
@@ -332,20 +493,37 @@ class BackgroundPanel(QDockWidget):
         if self.plan and [layer.id() for layer in self.selected_layers()] != self.plan['source_ids']:
             self._invalidate()
         if not self.layers.count():
-            self._tell('Lade zunächst ein Luftbild oder andere Grundlagen in dein QGIS-Projekt.')
+            self._tell('Load an aerial image or other map layers into your QGIS project first.')
 
     def selected_layers(self):
         ids = {self.layers.item(i).data(Qt.UserRole) for i in range(self.layers.count())
                if self.layers.item(i).checkState() == Qt.Checked}
         return [layer for layer in self.project.layerTreeRoot().layerOrder() if layer.id() in ids]
 
+    def _area_visibility(self):
+        from_layer = self.area.currentIndex() == 1
+        self.area_layer.setVisible(from_layer)
+        self.area_layer_label.setVisible(from_layer)
+        self.area_layer_label.help.setVisible(from_layer)
+        self.build_button.setVisible(not from_layer)
+
+    def _sources_changed(self, *args):
+        if self._grid_area is not None:
+            self._grid_changed()
+        elif self.area.currentIndex() == 1 and self.area_layer.currentData() and self.selected_layers():
+            self.build()
+        else:
+            self._invalidate()
+
     def _area_changed(self, *args):
-        self.area_layer.setEnabled(self.area.currentIndex() == 1)
+        self._area_visibility()
         self._grid_area = None
         self._fitted_size = None
         self._update_fit_buttons()
         self._grid_timer.stop()
         self._invalidate()
+        if self.area.currentIndex() == 1 and self.area_layer.currentData() and self.selected_layers():
+            self.build()
 
     def capture_area(self):
         self._grid_timer.stop()
@@ -359,17 +537,17 @@ class BackgroundPanel(QDockWidget):
 
     def _update_fit_buttons(self):
         side = self._fitted_size or self.tile_size.value() * self.tile_unit.currentData()
-        for widget, label, larger in [(self.fewer_tiles, 'Weniger Kacheln', True),
-                                      (self.more_tiles, 'Mehr Kacheln', False)]:
+        for widget, label, larger in [(self.fewer_tiles, 'Fewer tiles', True),
+                                      (self.more_tiles, 'More tiles', False)]:
             proposal = fitted_size(self._grid_area[0], side, larger) if self._grid_area else None
             widget.setEnabled(proposal is not None)
             widget.setText(label)
             if proposal:
                 size, rows, columns = proposal
                 widget.setText(f'{label} · {columns} × {rows}')
-                widget.setToolTip(f'{columns * rows} Kacheln mit je {size:g} m Seitenlänge. Raster am Gebiet ausrichten.')
+                widget.setToolTip(f'{columns * rows} tiles with {size:g} m sides. Fit the grid to the area.')
             else:
-                widget.setToolTip('Zuerst Gebiet übernehmen oder andere Kachelgröße wählen.')
+                widget.setToolTip('Set an area first, or choose a different tile size.')
 
     def fit_tiles(self, larger):
         if self._busy or self._grid_area is None:
@@ -410,7 +588,7 @@ class BackgroundPanel(QDockWidget):
         if self.plan:
             self.plan['dirty'] = True
             self._update_generate()
-            self.plan_hint.setText('Einstellungen geändert. Raster neu erstellen, bevor du generierst.')
+            self.generate_button.setToolTip('Settings changed. Update the grid before generating.')
 
     def _project_cleared(self):
         self.cancel_generation()
@@ -428,10 +606,10 @@ class BackgroundPanel(QDockWidget):
         self.grid_layers = []
         self.tile_features = {}
         self._previous_grid_group_name = None
-        self.plan_hint.setText('Projekt gewechselt. Bitte ein neues Raster erstellen.')
+        self.tiles_page.setTitle('Tiles')
+        self._tell('Project changed. Set a new area.')
 
     def build(self, stay=False):
-        previous_tab = self.tabs.currentIndex()
         self._invalidate()
         try:
             self._build()
@@ -439,28 +617,26 @@ class BackgroundPanel(QDockWidget):
             self._tell(str(error), True)
         finally:
             self._update_fit_buttons()
-            if stay:
-                self.tabs.setCurrentIndex(previous_tab)
 
     def _build(self):
         if self._busy:
             return
         if not self.selected_layers():
-            raise ValueError('Wähle mindestens einen Grundlagen-Layer aus.')
+            raise ValueError('Select at least one map layer.')
         canvas = self.iface.mapCanvas()
         if abs(canvas.rotation()) > 1e-6:
-            raise ValueError('Bitte die Kartendrehung zuerst auf 0° setzen.')
+            raise ValueError('Set map rotation to 0° first.')
         settings = QgsMapSettings(canvas.mapSettings())
         if self._grid_area is None:
             display_crs = settings.destinationCrs()
             if not display_crs.isValid():
-                raise ValueError('Bitte zuerst ein gültiges Projekt-KBS setzen.')
+                raise ValueError('Set a valid project CRS first.')
             extent = QgsRectangle(canvas.extent())
             area_crs = display_crs
             if self.area.currentIndex() == 1:
                 layer = self.project.mapLayer(self.area_layer.currentData())
                 if layer is None:
-                    raise ValueError('Wähle einen gültigen Gebiets-Layer aus.')
+                    raise ValueError('Select a valid area layer.')
                 extent, area_crs = layer.extent(), layer.crs()
             wgs84 = QgsCoordinateReferenceSystem('EPSG:4326')
             center = QgsCoordinateTransform(area_crs, wgs84, self.project).transform(extent.center())
@@ -481,12 +657,12 @@ class BackgroundPanel(QDockWidget):
         side = self._fitted_size or self.tile_size.value() * self.tile_unit.currentData()
         origin = (bounds[0], bounds[3]) if self._fitted_size else (0, 0)
         if 2 * halo >= pixels:
-            raise ValueError('Der Kontextsaum muss kleiner als die halbe Bildkante sein.')
+            raise ValueError('The context margin must be smaller than half the image size.')
         resolution = side / (pixels - 2 * halo)
         tiles, rows, columns = build_grid(bounds, resolution, pixels, halo,
                                          self.border.currentIndex() == 1, tile_size=side, origin=origin)
         if not tiles:
-            raise ValueError('Keine vollständige Kachel passt in dieses Gebiet. Vollständige Abdeckung oder kleinere Kachelgröße wählen.')
+            raise ValueError('No full tile fits this area. Choose full coverage or a smaller tile size.')
         self.tiles = tiles
         self.plan = dict(bounds=bounds, resolution=resolution, tile_size_m=side, grid_origin=origin, fitted=self._fitted_size is not None,
                          pixels=pixels, halo=halo, crs=crs, settings=settings, dirty=False,
@@ -501,28 +677,26 @@ class BackgroundPanel(QDockWidget):
         self.table.setHorizontalHeaderLabels([column_name(i) for i in range(columns)])
         self.table.setVerticalHeaderLabels([str(i + 1) for i in range(rows)])
         for tile in tiles:
-            item = QTableWidgetItem(f'{tile.name}\nOffen')
+            item = QTableWidgetItem(tile.name)
             item.setTextAlignment(Qt.AlignCenter)
             item.setData(Qt.UserRole, tile.name)
-            item.setToolTip(f'Kern: {tile.core}\nEingabe inkl. Kontext: {tile.source}')
+            item.setToolTip(f'Core: {tile.core}\nInput including context: {tile.source}')
             self.table.setItem(tile.row, tile.column, item)
         self._make_grid_layers()
         core = pixels - 2 * halo
-        unit = 'm/Pixel'
-        detail = (f'{columns} Spalten × {rows} Zeilen · {len(tiles)} Kacheln\n'
-                  f'Kachelgröße {side:g} m × {side:g} m\n'
-                  f'Eingabe {pixels} px · Kern {core} px · Kontext {halo} px/Seite\n'
+        unit = 'm/pixel'
+        detail = (f'{columns} columns × {rows} rows · {len(tiles)} tiles\n'
+                  f'Tile size {side:g} m × {side:g} m\n'
+                  f'Input {pixels} px · Core {core} px · Context {halo} px/side\n'
                   f'{crs.authid() or crs.description()} · {resolution:.8g} {unit}')
         area = (bounds[2] - bounds[0]) * (bounds[3] - bounds[1])
         excess = max(0, (rows * columns * side * side / area - 1) * 100)
-        alignment = 'An Gebiet angepasst' if self._fitted_size else 'Feste Kachelgröße'
-        self.fit_hint.setText(f'{alignment} · {columns} × {rows} = {len(tiles)} Kacheln · {excess:.1f} % Überstand')
+        alignment = 'Fitted to area' if self._fitted_size else 'Fixed tile size'
+        self.tile_size.setToolTip(f'{alignment} · {columns} × {rows} · {excess:.1f}% overhang')
         self._update_fit_buttons()
-        self.summary.setText(detail + f'\n{alignment} · {excess:.1f} % Überstand')
-        self.plan_hint.setText(detail)
+        self._tell(detail + f'\n{alignment} · {excess:.1f}% overhang')
         self.select_all()
-        self.tabs.setCurrentIndex(1)
-        self._tell('Raster erstellt. Gebiet und Raster sind geografisch fixiert; Kartennavigation ändert dieses Raster nicht. Alle Kacheln sind ausgewählt.')
+        self._tell('Grid created. Area and tiles are fixed in map coordinates. All tiles selected.')
 
     def _make_grid_layers(self):
         for layer_id in self.grid_layers:
@@ -531,14 +705,14 @@ class BackgroundPanel(QDockWidget):
         self.grid_layers = []
         self.tile_features = {}
         root = self.project.layerTreeRoot()
-        group = root.insertGroup(0, 'AI · Kachelraster')
+        group = root.insertGroup(0, 'AI · Tile grid')
         # Empty old groups are removed only if they were created by this panel.
         old_group = root.findGroup(getattr(self, '_previous_grid_group_name', '') or '')
         if old_group is not None and old_group != group and not old_group.children():
             old_group.parent().removeChildNode(old_group)
-        group.setName('AI · Kachelraster · ' + uuid.uuid4().hex[:6])
+        group.setName('AI · Tile grid · ' + uuid.uuid4().hex[:6])
         self._previous_grid_group_name = group.name()
-        for name, field, color in [('Kernflächen', 'core', '#2879b9'), ('Eingaben inklusive Kontext', 'source', '#df8c30')]:
+        for name, field, color in [('Tile cores', 'core', '#2879b9'), ('Inputs including context', 'source', '#df8c30')]:
             layer = QgsVectorLayer('Polygon?field=tile:string&field=row:integer&field=column:integer', name, 'memory')
             layer.setCrs(self.plan['crs'])
             layer.setCustomProperty('mapstyle_ai/owned', True)
@@ -567,6 +741,7 @@ class BackgroundPanel(QDockWidget):
                 self.tile_features = {feature['tile']: feature.id() for feature in layer.getFeatures()}
                 self.core_layer_id = layer.id()
             self.grid_layers.append(layer.id())
+        self._grid_visibility()
 
     def selected_tiles(self):
         names = {item.data(Qt.UserRole) for item in self.table.selectedItems()}
@@ -592,36 +767,92 @@ class BackgroundPanel(QDockWidget):
 
     def _selection_changed(self):
         tiles = self.selected_tiles()
-        self.selection_label.setText(f'{len(tiles)} von {len(self.tiles)} Kacheln ausgewählt')
+        self.tiles_page.setTitle(f'Tiles · {len(tiles)}/{len(self.tiles)}')
         self._update_generate()
         layer = self.project.mapLayer(getattr(self, 'core_layer_id', ''))
         if layer:
             layer.selectByIds([self.tile_features[tile.name] for tile in tiles if tile.name in self.tile_features])
 
-    def _overlap_visibility(self, checked):
-        if len(self.grid_layers) > 1:
-            node = self.project.layerTreeRoot().findLayer(self.grid_layers[1])
+    def _grid_visibility(self, *args):
+        for index, layer_id in enumerate(self.grid_layers):
+            node = self.project.layerTreeRoot().findLayer(layer_id)
             if node:
-                node.setItemVisibilityChecked(checked)
+                node.setItemVisibilityChecked(self.show_frames.isChecked() and
+                                             (index == 0 or self.show_overlap.isChecked()))
+
+    def _output_directory(self):
+        path = self.output.text().strip()
+        if path:
+            directory = Path(path).expanduser()
+            if not directory.is_dir():
+                raise ValueError('Choose an existing output folder.')
+            return directory
+        if self._temporary_output is None:
+            # Keep files alive for loaded QGIS layers, including after panel reload.
+            self._temporary_output = tempfile.mkdtemp(prefix='mapstyle-ai-')
+        return Path(self._temporary_output)
 
     def choose_output(self):
-        directory = QFileDialog.getExistingDirectory(self, 'Exportordner wählen', self.output.text())
+        directory = QFileDialog.getExistingDirectory(self, 'Choose output folder', self.output.text())
         if directory:
             self.output.setText(directory)
 
     def choose_reference(self):
-        filename, _ = QFileDialog.getOpenFileName(self, 'Stilreferenz wählen', '', 'Bilder (*.png *.jpg *.jpeg *.webp *.tif *.tiff)')
-        if filename:
-            self.reference.setText(filename)
-            self._reference_preview()
+        filenames, _ = QFileDialog.getOpenFileNames(
+            self, 'Choose style references', '', 'Images (*.png *.jpg *.jpeg *.webp *.tif *.tiff)')
+        self.add_references(filenames)
+
+    def add_references(self, filenames):
+        invalid = []
+        for filename in filenames:
+            path = str(Path(filename).expanduser().resolve())
+            if any(reference['path'] == path for reference in self.references):
+                continue
+            if QImage(path).isNull():
+                invalid.append(Path(path).name)
+                continue
+            self.references.append(dict(id=self._next_reference_id, path=path))
+            self._next_reference_id += 1
+        self._reference_preview()
+        if invalid:
+            self._tell('Unreadable reference images: ' + ', '.join(invalid), True)
+
+    def remove_reference(self, reference_id):
+        if self._busy:
+            return
+        self.references = [reference for reference in self.references if reference['id'] != reference_id]
+        self._reference_preview()
 
     def _reference_preview(self):
-        pixmap = QPixmap(self.reference.text()) if self.reference.text().strip() else QPixmap()
-        if pixmap.isNull():
-            self.reference_preview.clear()
-            self.reference_preview.setText('Kein gültiges Referenzbild gewählt')
-        else:
-            self.reference_preview.setPixmap(pixmap.scaled(300, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.reference_list.clear()
+        self.reference_list.setVisible(bool(self.references))
+        for reference in self.references:
+            card = QWidget()
+            row = QHBoxLayout(card)
+            preview_column = QVBoxLayout()
+            preview_column.addWidget(QLabel(f'Reference {reference["id"]}'))
+            preview = QLabel()
+            pixmap = QPixmap(reference['path'])
+            if pixmap.isNull():
+                preview.setText('Image unavailable')
+            else:
+                preview.setPixmap(pixmap.scaled(100, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            preview_column.addWidget(preview)
+            row.addLayout(preview_column)
+            name = text_label(Path(reference['path']).name)
+            name.setToolTip(reference['path'])
+            row.addWidget(name, 1)
+            remove = button('Remove', lambda checked=False, number=reference['id']: self.remove_reference(number))
+            remove.setAccessibleName(f'Remove Reference {reference["id"]}')
+            row.addWidget(remove)
+            item = QListWidgetItem(self.reference_list)
+            item.setData(Qt.UserRole, reference['id'])
+            item.setSizeHint(card.sizeHint())
+            self.reference_list.setItemWidget(item, card)
+        height = sum(self.reference_list.item(i).sizeHint().height()
+                     for i in range(self.reference_list.count()))
+        self.reference_list.setFixedHeight(min(280, max(110, height + 2 * self.reference_list.frameWidth())))
+        self._update_generate()
 
     def _provider_changed(self, provider):
         self._provider_before_switch = self._provider
@@ -630,20 +861,12 @@ class BackgroundPanel(QDockWidget):
         self.key.setText(self._keys.get(provider, ''))
         self._models[self._provider_before_switch] = self.model.text()
         self.model.setText(self._models.get(provider, MODELS[provider][0]))
-        self.model.setToolTip('Weitere Modelle: ' + ', '.join(MODELS[provider][1:]))
+        self.model.setToolTip('Other models: ' + ', '.join(MODELS[provider][1:]))
         self.quality.setEnabled(provider == OPENAI)
 
-    def reset_prompt(self):
-        answer = QMessageBox.question(self, 'Prompt zurücksetzen', 'Den bearbeiteten Prompt durch den Standardprompt ersetzen?')
-        if answer == QMessageBox.Yes:
-            self.prompt.setPlainText(DEFAULT_PROMPT)
-
     def resolved_prompt(self):
-        result = self.prompt.toPlainText()
-        for key, value in {'tile_px': self.plan['pixels'], 'core_px': self.plan['pixels'] - 2 * self.plan['halo'],
-                           'halo_px': self.plan['halo']}.items():
-            result = result.replace('{' + key + '}', str(value))
-        return result
+        return build_prompt(self.prompt.toPlainText(),
+                            [reference['id'] for reference in self.references], self.plan['pixels'])
 
     def _render_settings(self):
         settings = QgsMapSettings(self.plan['settings'])
@@ -653,7 +876,7 @@ class BackgroundPanel(QDockWidget):
         settings.setBackgroundColor(QColor('white'))
         layers = self.selected_layers()
         if not layers:
-            raise ValueError('Keine Grundlagen-Layer verfügbar.')
+            raise ValueError('No map layers available.')
         settings.setLayers(layers)
         settings.setFlag(Qgis.MapSettingsFlag.DrawLabeling, False)
         settings.setFlag(Qgis.MapSettingsFlag.DrawSelection, False)
@@ -668,8 +891,14 @@ class BackgroundPanel(QDockWidget):
     def _set_busy(self, busy):
         self._busy = busy
         self.source_page.setEnabled(not busy)
+        self.area_page.setEnabled(not busy)
+        self.advanced_page.setEnabled(not busy)
+        self.stop_button.setVisible(busy)
         self.table.setEnabled(not busy)
-        self.generation_page.setEnabled(not busy)
+        self.provider_page.setEnabled(not busy)
+        self.reference_list.setEnabled(not busy)
+        self.reference_button.setEnabled(not busy)
+        self.prompt.setEnabled(not busy)
         self.import_button.setEnabled(not busy)
         self.output.setEnabled(not busy)
         self._selection_changed()
@@ -679,13 +908,13 @@ class BackgroundPanel(QDockWidget):
         item = self.table.item(tile.row, tile.column)
         if item:
             item.setText(f'{tile.name}\n{status}')
-            item.setBackground(QColor('#fde5e2') if status == 'Fehler' else
-                               QColor('#e4f3ed') if status in ('Exportiert', 'Fertig', 'Ergebnis') else QColor('#e4eefb'))
+            item.setBackground(QColor('#fde5e2') if status == 'Failed' else
+                               QColor('#e4f3ed') if status in ('Exported', 'Done', 'Result') else QColor('#e4eefb'))
 
     def _add_raster(self, path, name, group, visible=True):
         layer = QgsRasterLayer(str(path), name)
         if not layer.isValid():
-            raise ValueError(f'Raster konnte nicht geladen werden: {path}')
+            raise ValueError(f'Could not load raster: {path}')
         layer.setCustomProperty('mapstyle_ai/owned', True)
         self.project.addMapLayer(layer, False)
         group.addLayer(layer).setItemVisibilityChecked(visible)
@@ -694,27 +923,28 @@ class BackgroundPanel(QDockWidget):
     def preview_input(self):
         selected = self.selected_tiles()
         if len(selected) != 1 or selected[0].name not in self.exported:
-            self._tell('Für die Vorschau genau eine bereits exportierte Kachel auswählen.')
+            self._tell('Select exactly one tile with an exported input to preview.')
             return
         path = self.exported[selected[0].name]['png']
         dialog = QDialog(self)
-        dialog.setWindowTitle(f'{selected[0].name} · Tatsächliches KI-Eingabebild')
+        dialog.setWindowTitle(f'{selected[0].name} · Actual AI input image')
         layout = QVBoxLayout(dialog)
         image = QLabel()
         image.setAlignment(Qt.AlignCenter)
         image.setPixmap(QPixmap(path).scaled(760, 760, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         layout.addWidget(image)
         layout.addWidget(text_label(path))
-        layout.addWidget(button('Schließen', dialog.accept))
+        layout.addWidget(button('Close', dialog.accept))
         dialog.exec_()
 
     def _update_generate(self, *args):
         if not hasattr(self, 'generate_button'):
             return
         ready = (self.plan and not self.plan['dirty'] and self.selected_tiles()
-                 and self.key.text().strip() and self.reference.text().strip()
-                 and self.model.text().strip() and self.prompt.toPlainText().strip())
+                 and self.key.text().strip() and self.model.text().strip()
+                 and (self.references or self.prompt.toPlainText().strip()))
         self.generate_button.setEnabled(bool(ready) and not self._busy)
+        self.generate_button.setToolTip('Generate selected tiles' if ready else 'Set an area, select tiles, then add an API key and reference images or your instructions.')
 
     def generate_selected(self):
         if self._busy:
@@ -722,19 +952,20 @@ class BackgroundPanel(QDockWidget):
         try:
             tiles = self.selected_tiles()
             if not self.plan or self.plan['dirty'] or not tiles:
-                raise ValueError('Bitte ein aktuelles Raster erstellen und Kacheln auswählen.')
+                raise ValueError('Update the grid and select tiles first.')
             provider, model = self.provider.currentText(), self.model.text().strip()
             validate_options(provider, model, self.plan['pixels'])
             key = self.key.text().strip()
             if not key or '\n' in key or '\r' in key:
-                raise ValueError('Bitte einen gültigen API-Key eingeben.')
-            reference = image_png(self.reference.text().strip())
-            prompt = self.resolved_prompt().strip()
-            if not prompt:
-                raise ValueError('Bitte einen Prompt eingeben.')
+                raise ValueError('Enter a valid API key.')
+            validate_style(self.prompt.toPlainText(), [reference['id'] for reference in self.references])
+            references = [image_png(reference['path']) for reference in self.references]
+            prompt = self.resolved_prompt()
             intent = dict(provider=provider, model=model, key=key, prompt=prompt,
-                          reference=reference, quality=self.quality.currentText(),
+                          references=references, reference_records=[dict(reference) for reference in self.references],
+                          user_prompt=self.prompt.toPlainText(), quality=self.quality.currentText(),
                           concurrency=self.concurrent.value(), clip=self.clip.isChecked(),
+                          overlap_mode=self.overlap_mode.currentData(),
                           tile_ids=[tile.name for tile in tiles])
             self._launch_generation(intent)
         except Exception as error:
@@ -744,16 +975,22 @@ class BackgroundPanel(QDockWidget):
         try:
             tiles = [tile for tile in self.tiles if tile.name in intent['tile_ids']]
             if self.plan['halo'] <= 0:
-                raise ValueError('Für nahtlose Anschlüsse einen Kontextsaum größer als 0 wählen.')
+                raise ValueError('Use a context margin greater than zero for seamless connections.')
             parents = dependencies(tiles, self.seam_sources)
-            base = Path(self.output.text().strip()).expanduser()
-            if not self.output.text().strip() or not base.is_dir():
-                raise ValueError('Bitte einen existierenden Ausgabeordner wählen.')
+            validate_image_count(intent['provider'], intent['model'], len(intent['references']),
+                                 max((len(ids) for ids in parents.values()), default=0))
+            base = self._output_directory()
             settings = self._render_settings()
             directory = base / (datetime.now().strftime('generation-%Y%m%d-%H%M%S-') + uuid.uuid4().hex[:6])
             for folder in ('inputs', 'responses', 'results', 'neighbors'):
                 (directory / folder).mkdir(parents=True, exist_ok=True)
-            (directory / 'reference.png').write_bytes(intent['reference'])
+            reference_records = []
+            for reference, png in zip(intent['reference_records'], intent['references']):
+                relative = f'references/reference-{reference["id"]}.png'
+                (directory / relative).parent.mkdir(exist_ok=True)
+                (directory / relative).write_bytes(png)
+                reference_records.append(dict(id=reference['id'], label=f'Reference {reference["id"]}',
+                                              file=relative))
             # Snapshot previous anchors so future jobs remain reproducible.
             existing = {}
             for name, source in self.seam_sources.items():
@@ -763,7 +1000,7 @@ class BackgroundPanel(QDockWidget):
                 shutil.copyfile(source['png'], png)
                 write_geotiff(png, tif, source['bounds'], self.plan['crs'].toWkt())
                 existing[name] = dict(source, png=str(png), tif=str(tif))
-            manifest = dict(schema_version=2, workflow='live_neighbor_continuation',
+            manifest = dict(schema_version=3, workflow='live_neighbor_continuation',
                             state='generating', created_at=datetime.now().astimezone().isoformat(),
                             crs_wkt=self.plan['crs'].toWkt(), crs_authid=self.plan['crs'].authid(),
                             bounds=self.plan['bounds'], resolution=self.plan['resolution'],
@@ -775,7 +1012,9 @@ class BackgroundPanel(QDockWidget):
                             provider=intent['provider'], model=intent['model'], prompt=intent['prompt'],
                             quality=intent['quality'], concurrency=intent['concurrency'],
                             request_timeout_seconds=DEFAULT_TIMEOUT_MS // 1000,
-                            clip_results=intent['clip'], reference='reference.png', api_enabled=True,
+                            clip_results=intent['clip'], overlap_mode=intent['overlap_mode'],
+                            references=reference_records, user_prompt=intent['user_prompt'],
+                            prompt_version=PROMPT_VERSION, api_enabled=True,
                             tiles=[dict(tile.record(), state='queued', dependencies=parents[tile.name]) for tile in tiles])
             self._generation_records = {tile.name:dict(directory=str(directory), manifest=manifest, tile=tile)
                                         for tile in tiles}
@@ -794,13 +1033,13 @@ class BackgroundPanel(QDockWidget):
             for tile in tiles:
                 self.seam_sources.pop(tile.name, None)
                 self.generated.discard(tile.name)
-                self._set_tile_status(tile, 'Wartet')
+                self._set_tile_status(tile, 'Queued')
             self.progress.setRange(0, len(tiles))
             self.progress.setValue(0)
             self._set_busy(True)
             self.stop_button.setEnabled(True)
             self._load_export_inputs = self.load_inputs.isChecked()
-            self._tell(f'Live-Generierung: {len(tiles)} Kacheln, bis zu {intent["concurrency"]} gleichzeitig nach Nachbarfreigabe.')
+            self._tell(f'Generating {len(tiles)} tiles, up to {intent["concurrency"]} parallel jobs as neighbors become ready.')
             self.generator.start()
         except Exception as error:
             self._set_busy(False)
@@ -808,14 +1047,15 @@ class BackgroundPanel(QDockWidget):
             self._tell(safe_error(error, intent['key']), True)
 
     def _generation_preparing(self, name):
-        self._set_tile_status(self._generation_records[name]['tile'], 'Live-Export …')
+        self._set_tile_status(self._generation_records[name]['tile'], 'Rendering…')
         self._generation_state(name, 'exporting')
 
     def _live_input_ready(self, name, prepared):
         record = self._generation_records[name]
         record.update(prepared)
         self.exported[name] = record
-        prompt = continuation_prompt(self.generation_manifest['prompt'], prepared['neighbors'], prepared['protected'])
+        prompt = continuation_prompt(self.generation_manifest['prompt'], prepared['neighbors'], prepared['protected'],
+                                     len(self.generation_manifest['references']))
         for entry in self.generation_manifest['tiles']:
             if entry['id'] == name:
                 entry.update(input_png=f'inputs/{name}.png', input_tif=f'inputs/{name}.tif',
@@ -825,30 +1065,28 @@ class BackgroundPanel(QDockWidget):
             group = self.project.layerTreeRoot().findGroup(f'AI · {self.generation_directory.name}')
             if group is None:
                 group = self.project.layerTreeRoot().insertGroup(1, f'AI · {self.generation_directory.name}')
-            inputs = next((g for g in group.children() if g.name()=='Live-Eingaben'), None)
+            inputs = next((g for g in group.children() if g.name()=='Live inputs'), None)
             if inputs is None:
-                inputs = group.addGroup('Live-Eingaben')
-            self._add_raster(prepared['tif'], f'{name} · Live-Eingabe', inputs, visible=False)
+                inputs = group.addGroup('Live inputs')
+            self._add_raster(prepared['tif'], f'{name} · Live input', inputs, visible=False)
         self._generation_state(name, 'prepared')
 
     def _accept_seam_result(self, name, filename, prepared):
         record = self._generation_records[name]
-        image = QImage(filename)
-        original = QImage(prepared['png'])
-        corrected = copy_regions(image, original, prepared['protected'])
-        stitched = self.generation_directory/'results'/f'{name}-stitched.png'
-        if not corrected.save(str(stitched), 'PNG'):
-            raise ValueError('Geschützte Anschlussbereiche konnten nicht gespeichert werden.')
-        self._store_result(record['tile'], record, filename, 'api_generation',
-                           variant='KI-Original', visible=False)
-        self._store_result(record['tile'], record, str(stitched), 'api_generation',
-                           variant='Überlappung zurückkopiert', visible=False)
-        blended = blend_regions(image, original, prepared['protected'], record['manifest']['halo_pixels'])
-        blended_path = self.generation_directory/'results'/f'{name}-blended.png'
-        if not blended.save(str(blended_path), 'PNG'):
-            raise ValueError('Überblendete Kachel konnte nicht gespeichert werden.')
-        source = self._store_result(record['tile'], record, str(blended_path), 'api_generation',
-                                    variant='Überlappung weich überblendet')
+        mode = record['manifest'].get('overlap_mode', 'blend')
+        if mode not in OVERLAP_MODES:
+            raise ValueError('Unknown overlap handling mode.')
+        result_path = filename
+        if mode != 'original':
+            image = QImage(filename)
+            original = QImage(prepared['png'])
+            result = (copy_regions(image, original, prepared['protected']) if mode == 'copy' else
+                      blend_regions(image, original, prepared['protected'], record['manifest']['halo_pixels']))
+            result_path = self.generation_directory/'results'/f'{name}-{mode}.png'
+            if not result.save(str(result_path), 'PNG'):
+                raise ValueError('Could not save the tile transition.')
+        source = self._store_result(record['tile'], record, str(result_path), 'api_generation',
+                                    variant=OVERLAP_MODES[mode][2])
         record['stored'] = True
         self.seam_sources[name] = source
         return source
@@ -863,7 +1101,7 @@ class BackgroundPanel(QDockWidget):
         try:
             write_json(self.generation_directory / 'manifest.json', manifest)
         except OSError as save_error:
-            self._tell(f'Generierungsprotokoll konnte nicht gespeichert werden: {save_error}', True)
+            self._tell(f'Could not save generation log: {save_error}', True)
         done = sum(entry['state'] in ('completed', 'failed', 'cancelled') for entry in manifest['tiles'])
         self.progress.setValue(done)
 
@@ -871,18 +1109,19 @@ class BackgroundPanel(QDockWidget):
         for entry in self.generation_manifest['tiles']:
             if entry['id'] == name:
                 entry['request_started_at'] = datetime.now().astimezone().isoformat()
-        self._set_tile_status(self._generation_records[name]['tile'], 'Generiert …')
+        self._set_tile_status(self._generation_records[name]['tile'], 'Generating…')
         self._generation_state(name, 'running')
 
     def _generation_succeeded(self, name, filename):
         record = self._generation_records[name]
         try:
             if not record.get('stored'):
-                raise ValueError('Ergebnis wurde noch nicht als Anschluss übernommen.')
+                raise ValueError('Result has not been registered as a neighbor yet.')
             self.generated.add(name)
-            self._set_tile_status(record['tile'], 'Fertig')
+            self._set_tile_status(record['tile'], 'Done')
             self._generation_state(name, 'completed')
-            self._tell(f'{name}: Drei Varianten gespeichert: KI-Original, zurückkopiert und weich überblendet.')
+            mode = record['manifest'].get('overlap_mode', 'blend')
+            self._tell(f'{name}: Saved result · {OVERLAP_MODES[mode][0]}.')
         except Exception as error:
             self._generation_failed(name, safe_error(error, self.key.text().strip()))
 
@@ -890,12 +1129,12 @@ class BackgroundPanel(QDockWidget):
         for entry in self.generation_manifest['tiles']:
             if entry['id'] == name:
                 entry['failed_at'] = datetime.now().astimezone().isoformat()
-        self._set_tile_status(self._generation_records[name]['tile'], 'Fehler')
+        self._set_tile_status(self._generation_records[name]['tile'], 'Failed')
         self._generation_state(name, 'failed', error)
         self._tell(f'{name}: {error}', True)
 
     def _generation_cancelled_tile(self, name):
-        self._set_tile_status(self._generation_records[name]['tile'], 'Abgebrochen')
+        self._set_tile_status(self._generation_records[name]['tile'], 'Cancelled')
         self._generation_state(name, 'cancelled')
 
     def _generation_finished(self):
@@ -911,12 +1150,12 @@ class BackgroundPanel(QDockWidget):
         self.stop_button.setEnabled(False)
         self._set_busy(False)
         self.refresh_layers()
-        self._tell(f'Generierung beendet: {completed} fertig, {failed} fehlgeschlagen, {states.count("cancelled")} abgebrochen. Fertige Bilder bleiben geladen.')
+        self._tell(f'Generation finished: {completed} done, {failed} failed, {states.count("cancelled")} cancelled. Completed images remain loaded.')
 
     def cancel_generation(self):
         if self.generator and self.generator.active:
             self.generator.cancel()
-            self._tell('Generierung wird abgebrochen. Bereits gesendete Anfragen können beim Anbieter weiterlaufen und berechnet werden.')
+            self._tell('Cancelling generation. Requests already sent may continue at the provider and incur charges.')
 
 
     def import_result(self, filename=None):
@@ -925,10 +1164,10 @@ class BackgroundPanel(QDockWidget):
             return
         selected = self.selected_tiles()
         if len(selected) != 1 or selected[0].name not in self.exported:
-            self._tell('Bitte genau eine bereits exportierte Kachel auswählen.', True)
+            self._tell('Select exactly one tile with an exported input.', True)
             return
         if not isinstance(filename, str):
-            filename, _ = QFileDialog.getOpenFileName(self, 'Ergebnisbild wählen', '', 'Bilder (*.png *.jpg *.jpeg *.webp *.tif *.tiff)')
+            filename, _ = QFileDialog.getOpenFileName(self, 'Choose result image', '', 'Images (*.png *.jpg *.jpeg *.webp *.tif *.tiff)')
         if not filename:
             return
         try:
@@ -942,7 +1181,7 @@ class BackgroundPanel(QDockWidget):
         image = QImage(filename)
         pixels = manifest['input_pixels']
         if image.isNull() or image.width() != pixels or image.height() != pixels:
-            raise ValueError(f'Das Ergebnis muss genau {pixels} × {pixels} Pixel haben. Es wird nicht automatisch verzerrt.')
+            raise ValueError(f'The result must be exactly {pixels} × {pixels} pixels. Images are never stretched automatically.')
         window, extent = crop_window(tile, manifest['resolution'], manifest['halo_pixels'], pixels,
                                      manifest['bounds'] if manifest['clip_results'] else None)
         directory = Path(record['directory'])
@@ -951,7 +1190,7 @@ class BackgroundPanel(QDockWidget):
         png = directory / 'results' / f'{stem}-core.png'
         tif = directory / 'results' / f'{stem}.tif'
         if not image.save(str(original), 'PNG') or not image.copy(*window).save(str(png), 'PNG'):
-            raise ValueError('Ergebnisbild konnte nicht gespeichert werden.')
+            raise ValueError('Could not save result image.')
         write_geotiff(png, tif, extent, manifest['crs_wkt'])
         context_tif = directory / 'results' / f'{stem}-context.tif'
         write_geotiff(original, context_tif, tile.source, manifest['crs_wkt'])
@@ -959,12 +1198,12 @@ class BackgroundPanel(QDockWidget):
         group = self.project.layerTreeRoot().findGroup(f'AI · {directory.name}')
         if group is None:
             group = self.project.layerTreeRoot().insertGroup(1, f'AI · {directory.name}')
-        group_name = 'Ergebnisse · ' + variant if variant else 'Ergebnisse'
+        group_name = 'Results · ' + variant if variant else 'Results'
         result_group = next((child for child in group.children() if child.name() == group_name), None)
         if result_group is None:
             result_group = group.insertGroup(0, group_name)
             result_group.setItemVisibilityChecked(visible)
-        self._add_raster(tif, f'{tile.name} · {variant or "Ergebnis"}', result_group)
+        self._add_raster(tif, f'{tile.name} · {variant or "Result"}', result_group)
         for entry in manifest['tiles']:
             if entry['id'] == tile.name:
                 entry.setdefault('results', []).append(dict(
@@ -972,9 +1211,8 @@ class BackgroundPanel(QDockWidget):
                     context_tif=f'results/{context_tif.name}',
                     bounds=extent, crop_window=window, origin=origin, variant=variant))
         write_json(directory / 'manifest.json', manifest)
-        self._set_tile_status(tile, 'Ergebnis')
-        self.results.addItem(f'{tile.name} · {variant or "Ergebnis"} · {tif.name}')
-        self._tell(f'Ergebnis für {tile.name} georeferenziert geladen.')
+        self._set_tile_status(tile, 'Result')
+        self._tell(f'Loaded georeferenced result for {tile.name}.')
         return dict(id=tile.name, row=tile.row, column=tile.column, bounds=tile.source,
                     png=str(original), tif=str(context_tif))
 

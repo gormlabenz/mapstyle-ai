@@ -73,7 +73,7 @@ class LiveTileExport(QObject):
             for neighbor in self.neighbors:
                 layer = QgsRasterLayer(neighbor['tif'], 'AI · Anschluss ' + neighbor['id'])
                 if not layer.isValid():
-                    raise ValueError('Nachbarkachel ist nicht mehr lesbar: ' + neighbor['id'])
+                    raise ValueError('Neighbor tile is no longer readable: ' + neighbor['id'])
                 self.layers.append(layer)
             self.settings.setLayers(self.layers + self.settings.layers())
             self.settings.setExtent(QgsRectangle(*self.tile.source))
@@ -81,7 +81,7 @@ class LiveTileExport(QObject):
             expected = self.tile.source
             values = (actual.xMinimum(), actual.yMinimum(), actual.xMaximum(), actual.yMaximum())
             if any(abs(a-b) > max(self.settings.mapUnitsPerPixel()*1e-5, 1e-10) for a,b in zip(expected, values)):
-                raise ValueError('Render-Ausdehnung passt nicht zum Kachelraster.')
+                raise ValueError('Render extent does not match the tile grid.')
             self.job = QgsMapRendererSequentialJob(self.settings)
             self.job.finished.connect(self._finished)
             self.active = True
@@ -98,18 +98,18 @@ class LiveTileExport(QObject):
                 raise ValueError('; '.join(error.message for error in errors))
             image = self.job.renderedImage().convertToFormat(QImage.Format_ARGB32)
             if image.isNull():
-                raise ValueError('Die Kachel konnte nicht gerendert werden.')
+                raise ValueError('Could not render the tile.')
             resolution = self.settings.mapUnitsPerPixel()
             rectangles = []
             # Match QGIS draw order: the first/top neighbor has priority in corners.
             for neighbor in reversed(self.neighbors):
                 windows = overlap_windows(self.tile.source, neighbor['bounds'], resolution)
                 if windows is None:
-                    raise ValueError('Nachbarkachel hat keinen überlappenden Kontext.')
+                    raise ValueError('Neighbor tile has no overlapping context.')
                 target, source = windows
                 previous = QImage(neighbor['png'])
                 if previous.isNull() or previous.size() != image.size():
-                    raise ValueError('Nachbarkachel hat eine unerwartete Bildgröße.')
+                    raise ValueError('Neighbor tile has an unexpected image size.')
                 painter = QPainter(image)
                 painter.setCompositionMode(QPainter.CompositionMode_Source)
                 painter.drawImage(QRect(*target), previous, QRect(*source))
@@ -128,7 +128,7 @@ class LiveTileExport(QObject):
             tif = self.directory / f'{self.tile.name}.tif'
             mask_path = self.directory / f'{self.tile.name}-protected.png'
             if not image.save(str(png), 'PNG') or not mask.save(str(mask_path), 'PNG'):
-                raise ValueError('Live-Eingabebild konnte nicht gespeichert werden.')
+                raise ValueError('Could not save live input image.')
             write_geotiff(png, tif, self.tile.source, self.settings.destinationCrs().toWkt())
             self.completed.emit(dict(png=str(png), tif=str(tif), mask=str(mask_path),
                                      protected=rectangles, neighbors=[n['id'] for n in self.neighbors]))
