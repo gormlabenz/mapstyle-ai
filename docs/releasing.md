@@ -51,4 +51,7 @@ The GitHub workflow repeats unit tests and package validation on Linux. It does 
 - Public source and experimental release: https://github.com/gormlabenz/mapstyle-ai/releases/tag/v0.6.1
 - GitHub checks passed. The public ZIP was downloaded again; its checksum and all packaged files match the verified source.
 - The OSGeo mantra request was sent from `gorm@labenz.io` to `mantra-request@osgeo.org` with subject `OSGeo Mantra Request: Publish QGIS plugin`. Its presence in the sender's Sent mailbox was verified. The request includes the public source repository and LinkedIn affiliation link above.
-- Awaiting OSGeo's mantra response. Account creation and the QGIS repository upload have not yet been completed. The GitHub release is available for manual installation; QGIS repository approval remains pending.
+- OSGeo confirmed that GitHub OAuth can be used for QGIS submission. The submission used the existing GitHub login; a separate OSGeo account was not needed.
+- Version 0.6.1 was successfully uploaded to QGIS with all security rules enabled: https://plugins.qgis.org/plugins/mapstyle_ai/ (plugin ID 6788).
+- The contact address `gorm@labenz.io` was confirmed through QGIS' confirmation email; the website displayed “Email Confirmed”. Confirmation tokens are not stored here.
+- Validation status: https://plugins.qgis.org/plugins/mapstyle_ai/version/0.6.1/#security-tab . At upload, security/quality validation was running. Manual approval is required before the plugin is publicly available through QGIS. The GitHub release remains available for manual installation.
