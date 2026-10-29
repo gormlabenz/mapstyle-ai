@@ -1,0 +1,130 @@
+{
+  "date": "2026-10-29",
+  "generator": "built-in image_gen",
+  "layout": {
+    "columns": 5,
+    "rows": 4
+  },
+  "tiles": [
+    {
+      "tile": "A1",
+      "reference": 2,
+      "style": "Architectural white plaster city relief, sculpted ivory and graphite buildings, soft directional shadows, powder blue water. Match the material and rendering of the style reference.",
+      "generated": "/Users/gormlabenz/.codex/generated_images/01a1883b-b3a5-77a1-9977-1175e7ec02ed/exec-83fddbcb-f9b4-4e65-bcfe-4549b1e32477.png"
+    },
+    {
+      "tile": "B1",
+      "reference": 3,
+      "style": "Hand-painted watercolor urban map on textured paper, patchwork terracotta, mauve, ochre and muted blue building roofs, delicate outlines and dark green trees. Match reference.",
+      "generated": "/Users/gormlabenz/.codex/generated_images/01a1883b-b3a5-77a1-9977-1175e7ec02ed/exec-2a163063-b78c-4661-8327-f6f809e113bf.png"
+    },
+    {
+      "tile": "C1",
+      "reference": 4,
+      "style": "Bold playful midcentury illustrated city map, vermilion rooftops, yellow turquoise pink facades, creamy streets, printed grain. Match reference without adding labels.",
+      "generated": "/Users/gormlabenz/.codex/generated_images/01a1883b-b3a5-77a1-9977-1175e7ec02ed/exec-978de01f-c86b-4a85-ae53-89c804bc7c2a.png"
+    },
+    {
+      "tile": "D1",
+      "reference": 6,
+      "style": "Minimal white-background architectural map, tiny irregular multicolor blocks in earth tones, fine delicate architectural linework. Match reference.",
+      "generated": "/Users/gormlabenz/.codex/generated_images/01a1883b-b3a5-77a1-9977-1175e7ec02ed/exec-ae084f14-95fc-4a25-9be1-27c1d5cc7c1a.png"
+    },
+    {
+      "tile": "E1",
+      "reference": 8,
+      "style": "High-contrast black and white woodcut ink map, strong black street ribbons, intricate white roof hatching, graphic pen linework. Match reference.",
+      "generated": "/Users/gormlabenz/.codex/generated_images/01a1883b-b3a5-77a1-9977-1175e7ec02ed/exec-00dff509-d576-48dc-aa0a-d21cd085b92a.png"
+    },
+    {
+      "tile": "A2",
+      "reference": 1,
+      "style": "Antique engraved architectural birdseye city plan, parchment cream and deep violet shadows, finely detailed buildings. Match reference, keeping near orthographic view.",
+      "generated": "/Users/gormlabenz/.codex/generated_images/01a1883b-b3a5-77a1-9977-1175e7ec02ed/exec-6cdde38b-8b0a-49ce-888e-4edce3acfbbe.png"
+    },
+    {
+      "tile": "B2",
+      "reference": null,
+      "style": "Studio Ghibli inspired hand-painted anime background map, lush green canopies, warm terracotta roofs, soft watercolor textures, charming sunlit pastoral town, gentle cinematic light.",
+      "generated": "/Users/gormlabenz/.codex/generated_images/01a1883b-b3a5-77a1-9977-1175e7ec02ed/exec-0859c671-4df0-48a0-84b9-7afee1d977de.png"
+    },
+    {
+      "tile": "C2",
+      "reference": null,
+      "style": "Lord of the Rings inspired Middle-earth fantasy cartography, aged golden parchment, fine sepia ink roofs and tiny trees, medieval manuscript crosshatching, dark brown roads, no invented mountains or labels.",
+      "generated": "/Users/gormlabenz/.codex/generated_images/01a1883b-b3a5-77a1-9977-1175e7ec02ed/exec-e16b494e-9e5a-47dc-a802-0eb7e50b00ec.png"
+    },
+    {
+      "tile": "D2",
+      "reference": null,
+      "style": "Cyberpunk neon city map at midnight, deep navy-black ground, glowing cyan street edges, electric magenta roofs, violet vegetation, luminous fine circuit-like details.",
+      "generated": "/Users/gormlabenz/.codex/generated_images/01a1883b-b3a5-77a1-9977-1175e7ec02ed/exec-436475a8-b056-4ecc-bd36-a5909301584f.png"
+    },
+    {
+      "tile": "E2",
+      "reference": null,
+      "style": "Cyanotype architectural blueprint, rich Prussian blue paper, precise fine white building outlines, white dashed roads, technical hatching, elegant measured city survey, no labels.",
+      "generated": "/Users/gormlabenz/.codex/generated_images/01a1883b-b3a5-77a1-9977-1175e7ec02ed/exec-da20ac0b-1b2c-4e3c-a93c-c210abc41d84.png"
+    },
+    {
+      "tile": "A3",
+      "reference": null,
+      "style": "Layered cut-paper craft relief map, bright white roads recessed between stacked pastel coral mint lavender and sky blue cardstock buildings, tactile paper edges and subtle shadows, strictly top-down.",
+      "generated": "/Users/gormlabenz/.codex/generated_images/01a1883b-b3a5-77a1-9977-1175e7ec02ed/exec-571f5b62-a2c0-419d-8ba5-b99bd355e945.png"
+    },
+    {
+      "tile": "B3",
+      "reference": null,
+      "style": "Detailed 16-bit pixel art city map, jewel-green trees, warm brick roofs, creamy paved roads, tiny crisp square pixel details, nostalgic strategy game aesthetic, top down.",
+      "generated": "/Users/gormlabenz/.codex/generated_images/01a1883b-b3a5-77a1-9977-1175e7ec02ed/exec-7dd88592-d4fb-41f2-b392-0837a6df2268.png"
+    },
+    {
+      "tile": "C3",
+      "reference": null,
+      "style": "Japanese ukiyo-e woodblock city map, indigo ink outlines, muted coral roofs, jade foliage, ivory washi paper, delicate carved hatching and printing texture.",
+      "generated": "/Users/gormlabenz/.codex/generated_images/01a1883b-b3a5-77a1-9977-1175e7ec02ed/exec-e89ad686-5e03-4215-b799-4e74d23fd63c.png"
+    },
+    {
+      "tile": "D3",
+      "reference": null,
+      "style": "Bauhaus geometric city map, flat primary red cobalt blue yellow blocks, off-white negative-space streets, crisp black outlines, simplified bold roof shapes, refined screenprint.",
+      "generated": "/Users/gormlabenz/.codex/generated_images/01a1883b-b3a5-77a1-9977-1175e7ec02ed/exec-ffdde9c5-0ef3-46a7-b47d-0c1e6c07c0b3.png"
+    },
+    {
+      "tile": "E3",
+      "reference": null,
+      "style": "Opulent black and metallic gold Art Deco city map, charcoal ground, luminous gold building outlines and gold roof hatching, emerald green parks, precise luxurious graphic craftsmanship.",
+      "generated": "/Users/gormlabenz/.codex/generated_images/01a1883b-b3a5-77a1-9977-1175e7ec02ed/exec-5101d259-6b56-4a83-9159-0245c13852a9.png"
+    },
+    {
+      "tile": "A4",
+      "reference": null,
+      "style": "Tactile embroidered textile city map, cream linen road network, colorful stitched building footprints and textured green thread trees, ochre coral teal lilac embroidery, macro textile detail top-down.",
+      "generated": "/Users/gormlabenz/.codex/generated_images/01a1883b-b3a5-77a1-9977-1175e7ec02ed/exec-68a107f1-2ded-46c7-9bf7-8bf2de0cbdfa.png"
+    },
+    {
+      "tile": "B4",
+      "reference": null,
+      "style": "Candy-colored claymation miniature city map, rounded handmade polymer-clay buildings in apricot pink lemon and teal, soft rounded tree canopies, warm shadows, playful tactile top-down model.",
+      "generated": "/Users/gormlabenz/.codex/generated_images/01a1883b-b3a5-77a1-9977-1175e7ec02ed/exec-7ec24b7e-4fc3-43f8-a870-e7d2a44d5155.png"
+    },
+    {
+      "tile": "C4",
+      "reference": null,
+      "style": "Dark volcanic obsidian and glowing lava city map, charcoal stone roofs, ember orange roads and copper outline details, moody dramatic high contrast, strictly preserve geography.",
+      "generated": "/Users/gormlabenz/.codex/generated_images/01a1883b-b3a5-77a1-9977-1175e7ec02ed/exec-dce37a2b-787d-421f-a55b-bb995557f405.png"
+    },
+    {
+      "tile": "D4",
+      "reference": null,
+      "style": "Vintage risograph city map, fluorescent hot pink and deep ultramarine duotone, cream paper streets, coarse halftone roof textures, bold imperfect ink registration, expressive editorial print.",
+      "generated": "/Users/gormlabenz/.codex/generated_images/01a1883b-b3a5-77a1-9977-1175e7ec02ed/exec-0af8c8c6-ff8a-4cc4-9b62-0455b94f8fd4.png"
+    },
+    {
+      "tile": "E4",
+      "reference": null,
+      "style": "Intricate blue-and-white porcelain city map, cobalt blue hand-painted building roofs and fine ornamental tree marks on glossy ivory ceramic, delicate glazed ceramic material, top-down.",
+      "generated": "/Users/gormlabenz/.codex/generated_images/01a1883b-b3a5-77a1-9977-1175e7ec02ed/exec-42a7e90d-d4e7-4141-b1ed-62f50984ec9e.png"
+    }
+  ]
+}
