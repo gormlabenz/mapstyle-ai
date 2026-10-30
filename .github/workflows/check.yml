@@ -13,10 +13,10 @@ jobs:
   unit:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ inputs.ref || github.ref }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7.1.0
         with:
           python-version: '3.12'
       - run: python -m unittest discover -s tests -v
@@ -28,12 +28,12 @@ jobs:
       QT_QPA_PLATFORM: offscreen
       PYTHONPATH: /usr/share/qgis/python:/usr/share/qgis/python/plugins
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ inputs.ref || github.ref }}
       - name: Install QGIS LTR and Python bindings
         run: |
-          sudo curl --fail --silent --show-error --location https://download.qgis.org/downloads/qgis-archive-keyring.gpg --output /etc/apt/keyrings/qgis-archive-keyring.gpg
+          sudo curl --connect-timeout 30 --max-time 180 --retry 3 --fail --silent --show-error --location https://download.qgis.org/downloads/qgis-archive-keyring.gpg --output /etc/apt/keyrings/qgis-archive-keyring.gpg
           echo 'deb [signed-by=/etc/apt/keyrings/qgis-archive-keyring.gpg] https://qgis.org/ubuntu-ltr noble main' | sudo tee /etc/apt/sources.list.d/qgis.list
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y qgis python3-qgis python3-venv
@@ -56,7 +56,7 @@ jobs:
           mv "mapstyle_ai.$version.zip" dist/
           sha256sum "dist/mapstyle_ai.$version.zip" > "dist/mapstyle_ai.$version.zip.sha256"
           /usr/bin/python3 scripts/qgis_package_check.py "dist/mapstyle_ai.$version.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: qgis-plugin
           path: |
