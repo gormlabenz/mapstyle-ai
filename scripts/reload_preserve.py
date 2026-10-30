@@ -143,6 +143,6 @@ if state:
         new._selection_changed()
     new._update_fit_buttons()
     new._grid_timer.stop()
-    new._tell('MapStyle AI 0.6.2 ready. No image exports or API requests started.')
+    new._tell('MapStyle AI 0.6.3 ready. No image exports or API requests started.')
 state = None
 print('Interface updated. No image exports or API requests started.')

@@ -1,20 +1,65 @@
-name: Offline checks and package
-on: [push, pull_request]
+name: Tests and QGIS package
+on:
+  push:
+  pull_request:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        default: ''
 permissions:
   contents: read
 jobs:
-  check:
-    runs-on: ubuntu-latest
+  unit:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: python -m unittest discover -s tests -v
       - run: python scripts/package.py
+  qgis:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONPATH: /usr/share/qgis/python:/usr/share/qgis/python/plugins
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - name: Install QGIS LTR and Python bindings
+        run: |
+          sudo curl --fail --silent --show-error --location https://download.qgis.org/downloads/qgis-archive-keyring.gpg --output /etc/apt/keyrings/qgis-archive-keyring.gpg
+          echo 'deb [signed-by=/etc/apt/keyrings/qgis-archive-keyring.gpg] https://qgis.org/ubuntu-ltr noble main' | sudo tee /etc/apt/sources.list.d/qgis.list
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y qgis python3-qgis python3-venv
+          /usr/bin/python3 -c 'from qgis.core import Qgis; print(Qgis.QGIS_VERSION); assert 34400 <= Qgis.QGIS_VERSION_INT < 40000'
+      - name: Run all six isolated QGIS checks
+        run: |
+          /usr/bin/python3 scripts/qgis_credentials_check.py
+          /usr/bin/python3 scripts/qgis_metric_grid_check.py
+          /usr/bin/python3 scripts/qgis_compact_ui_check.py
+          /usr/bin/python3 scripts/qgis_reference_check.py
+          /usr/bin/python3 scripts/qgis_capabilities_check.py
+          /usr/bin/python3 scripts/qgis_result_variants_check.py
+      - name: Build with QGIS Plugin CI
+        run: |
+          /usr/bin/python3 -m venv --system-site-packages /tmp/qgis-plugin-ci
+          /tmp/qgis-plugin-ci/bin/pip install 'qgis-plugin-ci==2.10.0'
+          version=$(/usr/bin/python3 -c 'from configparser import ConfigParser; c=ConfigParser(); c.read("mapstyle_ai/metadata.txt"); print(c["general"]["version"])')
+          /tmp/qgis-plugin-ci/bin/qgis-plugin-ci package "$version"
+          mkdir -p dist
+          mv "mapstyle_ai.$version.zip" dist/
+          sha256sum "dist/mapstyle_ai.$version.zip" > "dist/mapstyle_ai.$version.zip.sha256"
+          /usr/bin/python3 scripts/qgis_package_check.py "dist/mapstyle_ai.$version.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: qgis-plugin
           path: |
-            dist/*.zip
-            dist/*.sha256
+            dist/mapstyle_ai.*.zip
+            dist/mapstyle_ai.*.zip.sha256
+          if-no-files-found: error

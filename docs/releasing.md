@@ -1,5 +1,21 @@
 # Releasing MapStyle AI
 
+## Automated releases from 0.6.3
+
+The `Tests and QGIS package` workflow runs unit tests and the six isolated QGIS integration scripts on Ubuntu 24.04 using the official QGIS 3 LTR repository. A version guard rejects QGIS 4 or versions older than 3.44. All fixtures are synthetic and no paid image API is called. QGIS Plugin CI 2.10.0 builds the archive; an isolated QGIS runtime loads that exact ZIP before it becomes a workflow artifact.
+
+`Publish QGIS plugin` runs when a GitHub release is published, repeats those checks at the release tag, then attaches the tested ZIP/checksum to the release and uploads the same archive to plugins.qgis.org. It uses QGIS Plugin CI's token uploader without rebuilding the tested artifact. Version 2.10.0 is pinned deliberately: its upload keeps the normal QGIS scan/manual-approval flow and does not opt into automatic approval. Publishing requires the repository Actions secret `QGIS_TOKEN`, scoped to the existing `mapstyle_ai` plugin. Never commit it or print it in logs.
+
+For a new version:
+
+1. Update `metadata.txt`, `CHANGELOG.md` (Keep a Changelog headings), and the README version. Commit and push; wait for both CI jobs to pass.
+2. Tag that commit `vMAJOR.MINOR.PATCH`, push the tag, then publish a GitHub prerelease while the plugin is experimental.
+3. Follow the `Publish QGIS plugin` run; confirm the uploaded version and security scan on plugins.qgis.org. Upload success is not QGIS approval.
+
+To retry, manually run `Publish QGIS plugin`, choose the same release tag in the **Use workflow from** selector and enter it in the `tag` input. The publisher rejects mismatched commits, versions, checksums, missing credentials and absent GitHub releases. A QGIS version that has already been uploaded must be inspected before retrying because the service may reject duplicate versions.
+
+Generated example maps and images are ignored under `examples/`; they are not needed by tests or release packages. Existing local files are preserved. Examples from previous commits remain in historical Git objects; no history rewrite is performed. Default shallow CI checkouts avoid downloading that old history.
+
 ## Release 0.6.2 — 2026-10-30
 
 Bug fix for repeated upper/left neighbor geography in generated tiles. Inspection of the affected run confirmed that target inputs and crop/georeferencing windows were correct; repetition was already present in raw provider responses. Full neighbor images were also attached to the requests, providing a competing geographic input. Version 0.6.2 sends their aligned overlap strips only, embedded in Image 1, and clarifies the target crop in prompt version 2.

@@ -1,10 +1,10 @@
-# MapStyle AI · QGIS 3.44 · Version 0.6.2
+# MapStyle AI · QGIS 3.44 · Version 0.6.3
 
 A QGIS plugin for illustrated, georeferenced map backgrounds from existing map layers, style references and/or a style description. Uses QGIS, Qt and GDAL without additional Python packages.
 
 ## Install and start
 
-Download [MapStyle AI 0.6.2](https://github.com/gormlabenz/mapstyle-ai/releases/tag/v0.6.2), then use **Plugins → Manage and Install Plugins → Install from ZIP** in QGIS 3.44 or later (QGIS 3 series). Enable MapStyle AI and open it from the Plugins menu or toolbar. This is an **experimental** release; QGIS repository approval is pending.
+Download [MapStyle AI 0.6.3](https://github.com/gormlabenz/mapstyle-ai/releases/tag/v0.6.3), then use **Plugins → Manage and Install Plugins → Install from ZIP** in QGIS 3.44 or later (QGIS 3 series). Enable MapStyle AI and open it from the Plugins menu or toolbar. This is an **experimental** release; QGIS repository approval is pending.
 
 Choose input layers and an area, select a tile size, enter your own provider API key, add a style reference and/or description, choose an output folder, and generate selected tiles. See the [quick-start guide](mapstyle_ai/README.md), [changelog](CHANGELOG.md) and [release procedure](docs/releasing.md).
 
@@ -82,7 +82,7 @@ Model availability depends on the API account. Web subscriptions do not replace 
 - `mapstyle_ai/`: plugin source.
 - `scripts/`, `tests/`: development helpers and offline checks.
 - `docs/`: project documentation.
-- `local/`, `ahrensburg/`, `examples/mapstyle-ai-test/`: ignored personal maps and manual experiments.
+- `local/`, `ahrensburg/`, `examples/`: ignored personal maps and manual experiments.
 - `dist/`, `test-output/`: ignored packages and test artifacts.
 
 ```sh
@@ -91,7 +91,7 @@ python3 scripts/package.py
 python3 -m unittest discover -s tests -v
 ```
 
-The install script refuses to overwrite an existing installation. The installable ZIP is `dist/mapstyle_ai-0.6.2.zip`.
+The install script refuses to overwrite an existing installation. The installable ZIP is `dist/mapstyle_ai-0.6.3.zip`.
 
 Offline QGIS checks on this Mac:
 
@@ -115,3 +115,5 @@ exec((Path(MAPSTYLE_REPO) / 'scripts/reload_preserve.py').read_text())
 ```
 
 Reloading starts no rendering or provider requests. It preserves temporary storage paths, tile selection, source choices, existing result associations and user-edited prompts. The previous single reference migrates to Reference 1; an unchanged previous default prompt migrates to an empty user field. Existing custom text is retained. Reloading preserves reference numbers and the next available number.
+
+Release automation and QGIS token setup are documented in [docs/releasing.md](docs/releasing.md). GitHub Actions runs unit tests, all six QGIS integration checks and an isolated package-load check before publication.
