@@ -51,7 +51,7 @@ def overlap_windows(target, neighbor, resolution):
             (pixel(left-neighbor[0]), pixel(neighbor[3]-top), width, height))
 
 
-def continuation_prompt(prompt, neighbors, windows, reference_count=1):
+def continuation_prompt(prompt, neighbors, windows):
     if not neighbors:
         return 'Illustrate the entire base map in Image 1 using the style instructions below.\n' + prompt
     sides = ['left' if h > w else 'top' for x, y, w, h in windows]
@@ -62,12 +62,13 @@ def continuation_prompt(prompt, neighbors, windows, reference_count=1):
              'The strips define the style to continue and take priority over style references and user styling instructions. '
              'Continue lines without gaps or offsets and match colors and textures '
              'without visible transitions, so the result reads as one continuous illustration.',
-             prompt,
-             'The additional neighbor images provide context; the exact connection requirements '
-             'are the illustrated strips in Image 1.']
-    for index, (name, rectangle, side) in enumerate(zip(neighbors, windows, sides), 2 + reference_count):
+             'Image 1 is the complete target tile. Its illustrated strips are already positioned '
+             'at the correct coordinates. Illustrate the remaining base map in place; '
+             'do not repeat, shift or expand the neighboring geography into that area.',
+             prompt]
+    for name, rectangle, side in zip(neighbors, windows, sides):
         x, y, w, h = rectangle
-        lines.append(f'Image {index}: neighbor tile {name}, connection at {side}. '
+        lines.append(f'Connection from neighbor tile {name} at {side}, already embedded in Image 1. '
                      f'Unchanged strip in Image 1: x={x}, y={y}, width={w}, height={h} pixels '
                      '(origin at top left).')
     return '\n'.join(lines)

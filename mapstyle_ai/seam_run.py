@@ -83,10 +83,11 @@ class SeamlessRun(QObject):
         exporter.deleteLater()
         self.prepared[name] = prepared
         self.input_ready.emit(name, prepared)
-        prompt = continuation_prompt(self.options['prompt'], prepared['neighbors'], prepared['protected'], len(self.options['references']))
-        neighbor_bytes = [Path(self.available[parent]['png']).read_bytes() for parent in prepared['neighbors']]
+        prompt = continuation_prompt(self.options['prompt'], prepared['neighbors'], prepared['protected'])
+        # Image 1 already contains the exact, aligned neighbor overlaps. Sending
+        # full neighbors as extra images can make the model repeat their geography.
         job = dict(id=name, input=prepared['png'], pixels=self.options['pixels'], prompt=prompt,
-                   neighbors=neighbor_bytes, output=str(self.directory/'responses'/f'{name}.png'))
+                   output=str(self.directory/'responses'/f'{name}.png'))
         queue = GenerationQueue([job], self.options['provider'], self.options['model'], self._key,
                                 prompt, self.options['references'], 1, self.options['quality'], parent=self,
                                 authcfg=self.authcfg)

@@ -52,7 +52,8 @@ class SeamPlanTests(unittest.TestCase):
 
     def test_per_tile_prompt_names_reference_and_locked_pixels(self):
         prompt = continuation_prompt('General style reference', ['A1'], [(0, 0, 256, 1024)])
-        self.assertIn('Image 3', prompt)
+        self.assertNotIn('Image 3', prompt)
+        self.assertIn('already embedded in Image 1', prompt)
         self.assertIn('A1', prompt)
         self.assertIn('width=256', prompt)
         self.assertIn('unchanged', prompt)

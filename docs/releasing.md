@@ -1,5 +1,11 @@
 # Releasing MapStyle AI
 
+## Release 0.6.2 — 2026-10-30
+
+Bug fix for repeated upper/left neighbor geography in generated tiles. Inspection of the affected run confirmed that target inputs and crop/georeferencing windows were correct; repetition was already present in raw provider responses. Full neighbor images were also attached to the requests, providing a competing geographic input. Version 0.6.2 sends their aligned overlap strips only, embedded in Image 1, and clarifies the target crop in prompt version 2.
+
+Verification: 48 unit tests and all six isolated QGIS integration checks passed. The reference check failed against the old full-neighbor request behavior, then passed after the fix. It now checks distinct 2 × 2 input/result geography and exact outgoing image lists for both providers across six simulated runs. ZIP loading and deterministic packaging are checked before publication. No paid provider request was made; the provider's visual response to the revised request remains unverified. Existing faulty tiles need regeneration.
+
 ## Release 0.6.1
 
 This is the first public experimental release. Minimum QGIS: 3.44; maximum: 3.99. QGIS 4 compatibility is not claimed. The plugin uses QGIS/Qt/GDAL and Python's standard library without pip dependencies. Paid OpenAI or Google Gemini API access is required only for generation.

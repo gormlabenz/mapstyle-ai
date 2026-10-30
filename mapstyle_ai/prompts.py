@@ -4,7 +4,7 @@
 """Internal map instructions and explicit image roles, independent of QGIS."""
 import re
 
-PROMPT_VERSION = 1
+PROMPT_VERSION = 2
 DEFAULT_PROMPT = """Use the spatial arrangement from Image 1. Preserve positions, basic shapes and connections of buildings, roads, paths, water and land areas. Adapt details to the requested style without inventing additional buildings or paths. Keep map orientation, scale and crop unchanged. No labels, legend or border.
 Return the complete image at exactly {tile_px} × {tile_px} pixels."""
 

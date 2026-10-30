@@ -14,7 +14,9 @@ auth_directory = tempfile.TemporaryDirectory()
 os.environ['QGIS_AUTH_DB_DIR_PATH'] = auth_directory.name
 os.environ['QGIS_CUSTOM_CONFIG_PATH'] = auth_directory.name
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from qgis.core import QgsApplication, QgsProject, QgsCoordinateReferenceSystem, QgsVectorLayer, QgsFeature, QgsGeometry, QgsRectangle
+from qgis.core import (QgsApplication, QgsProject, QgsCoordinateReferenceSystem, QgsVectorLayer,
+                       QgsFeature, QgsGeometry, QgsRectangle, QgsCategorizedSymbolRenderer,
+                       QgsRendererCategory, QgsFillSymbol)
 from qgis.gui import QgsMapCanvas
 from qgis.PyQt.QtCore import Qt, QObject, pyqtSignal, QTimer, QEventLoop
 from qgis.PyQt.QtGui import QImage, QColor
@@ -31,9 +33,18 @@ canvas = QgsMapCanvas()
 canvas.resize(800, 600)
 canvas.setDestinationCrs(QgsCoordinateReferenceSystem('EPSG:32632'))
 layer = QgsVectorLayer('Polygon?crs=EPSG:32632&field=name:string', 'Synthetic map', 'memory')
-feature = QgsFeature(layer.fields())
-feature.setGeometry(QgsGeometry.fromRect(QgsRectangle(500100, 5300200, 500700, 5300800)))
-layer.dataProvider().addFeatures([feature])
+tile_colors = {'A1': '#cc3333', 'B1': '#33cc33', 'A2': '#3333cc', 'B2': '#cccc33'}
+categories = []
+for name, color in tile_colors.items():
+    column, row = ord(name[0]) - ord('A'), int(name[1]) - 1
+    left, top = 500100 + 300 * column, 5300800 - 300 * row
+    feature = QgsFeature(layer.fields())
+    feature['name'] = name
+    feature.setGeometry(QgsGeometry.fromRect(QgsRectangle(left, top - 300, left + 300, top)))
+    layer.dataProvider().addFeatures([feature])
+    symbol = QgsFillSymbol.createSimple({'color': color, 'outline_style': 'no'})
+    categories.append(QgsRendererCategory(name, symbol, name))
+layer.setRenderer(QgsCategorizedSymbolRenderer('name', categories))
 layer.updateExtents()
 project.addMapLayer(layer)
 canvas.setLayers([layer])
@@ -76,9 +87,12 @@ class OfflineQueue(QObject):
     def start(self): QTimer.singleShot(0, self.complete)
     def complete(self):
         for job in self.jobs:
+            assert not job.get('neighbors'), 'Full neighbor images can replace the target geography'
             source = Path(job['input']).read_bytes()
+            image = QImage(job['input'])
+            assert image.pixelColor(image.width() // 2, image.height() // 2) == QColor(tile_colors[job['id']]), job['id']
             _, headers, body = make_request(self.provider, self.model, 'dummy', self.prompt,
-                                           job['pixels'], source, self.references, neighbors=job['neighbors'])
+                                           job['pixels'], source, self.references, neighbors=job.get('neighbors', ()))
             if self.provider == OPENAI:
                 msg = BytesParser(policy=policy.default).parsebytes(
                     ('Content-Type: ' + headers['Content-Type'] + '\r\n\r\n').encode() + body)
@@ -86,8 +100,8 @@ class OfflineQueue(QObject):
             else:
                 images = [base64.b64decode(part['inlineData']['data'])
                           for part in json.loads(body)['contents'][0]['parts'] if 'inlineData' in part]
-            assert images == [source, *self.references, *job['neighbors']]
-            captured.append((job['id'], self.prompt, len(self.references), len(job['neighbors'])))
+            assert images == [source, *self.references]
+            captured.append((job['id'], self.prompt, len(self.references)))
             self.started.emit(job['id'])
             Path(job['output']).write_bytes(source)
             self.succeeded.emit(job['id'], job['output'])
@@ -150,24 +164,28 @@ with tempfile.TemporaryDirectory(prefix='mapstyle-references-') as temp:
             assert len(captured) == 4, (captured, panel.log.toPlainText())
             assert all(tile['state'] == 'completed' for tile in manifest['tiles']), manifest['tiles']
             assert manifest['user_prompt'] == panel.prompt.toPlainText()
-            assert manifest['schema_version'] == 3 and manifest['prompt_version'] == 1
+            assert manifest['schema_version'] == 3 and manifest['prompt_version'] == 2
+            assert manifest['neighbor_context'] == 'aligned_input_strips'
             assert [r['id'] for r in manifest['references']] == ([] if mode == 'text' else [1, 3])
             for reference in manifest['references']:
                 assert (panel.generation_directory / reference['file']).is_file()
-            for name, prompt, refs, neighbors in captured:
+            for name, prompt, refs in captured:
                 tile = next(t for t in manifest['tiles'] if t['id'] == name)
                 assert tile['prompt'] == prompt
-                if neighbors:
-                    assert f'Image {2 + refs}: neighbor tile' in prompt
+                if tile['neighbors']:
+                    assert 'already embedded in Image 1' in prompt
+                    assert f'Image {2 + refs}' not in prompt
                 elif not refs:
                     assert 'Image 2' not in prompt
+                result = QImage(str(panel.generation_directory / tile['results'][-1]['file']))
+                assert result.pixelColor(result.width() // 2, result.height() // 2) == QColor(tile_colors[name]), name
             assert 'offline-test-key' not in json.dumps(manifest)
     panel.references = []
     panel.prompt.clear()
     panel._reference_preview()
     assert not panel.generate_button.isEnabled()
     # No UI selection cap; reject a provider overflow before any tile exports/requests.
-    panel.references = [dict(id=i, path=paths[0]) for i in range(1, 15)]
+    panel.references = [dict(id=i, path=paths[0]) for i in range(1, 17)]
     panel._reference_preview()
     panel.provider.setCurrentText(OPENAI)
     panel.key_inputs[panel._provider].setText('dummy')

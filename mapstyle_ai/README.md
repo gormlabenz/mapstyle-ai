@@ -25,7 +25,7 @@ Neighboring tiles are generated in dependency order. **Advanced settings → Til
 
 ## Data and costs
 
-Generation sends rendered map inputs, your selected style references, completed neighboring images and prompts to the selected provider. Only submit data you are authorized to share. There is no plugin-operated server or telemetry. Requests go to `api.openai.com` or `generativelanguage.googleapis.com` through QGIS networking.
+Generation sends rendered map inputs, your selected style references, spatially aligned overlap strips from completed neighbors and prompts to the selected provider. Only submit data you are authorized to share. There is no plugin-operated server or telemetry. Requests go to `api.openai.com` or `generativelanguage.googleapis.com` through QGIS networking.
 
 Generation uses paid provider APIs. There are no automatic paid retries. Cancellation stops local work and queued requests; a request already received by a provider may still be charged. Provider prices, model access and retention policies are controlled by that provider.
 

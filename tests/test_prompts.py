@@ -36,14 +36,17 @@ class PromptTests(unittest.TestCase):
                 validate_style(text, ids)
         validate_style('Farben wie Referenz 3, lines like Reference 1.', [1, 3])
 
-    def test_neighbor_positions_follow_actual_reference_count(self):
+    def test_neighbor_strips_do_not_introduce_extra_image_roles(self):
         for ids in ([], [1], [1, 3, 4]):
             with self.subTest(ids=ids):
                 base = build_prompt('Watercolor', ids, 1024)
-                prompt = continuation_prompt(base, ['A1'], [(0, 0, 256, 1024)], len(ids))
-                self.assertIn(f'Image {2 + len(ids)}: neighbor tile A1', prompt)
+                prompt = continuation_prompt(base, ['A1'], [(0, 0, 256, 1024)])
+                self.assertIn('Connection from neighbor tile A1 at left', prompt)
+                self.assertIn('already embedded in Image 1', prompt)
+                self.assertNotIn(f'Image {2 + len(ids)}', prompt)
+                self.assertIn('do not repeat, shift or expand', prompt)
                 self.assertIn('width=256', prompt)
-                start = continuation_prompt(base, [], [], len(ids))
+                start = continuation_prompt(base, [], [])
                 self.assertNotIn('neighbor tile', start)
                 self.assertNotIn('in the style of Image 2', start)
 

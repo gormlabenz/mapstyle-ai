@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.2 — 2026-10-30
+
+- Fix repeated upper/left neighbor geography in generated tiles: completed neighbors now provide only their spatially aligned overlap strips in Image 1, without sending full neighbor images alongside the target.
+- Clarify target geography and connection strips in continuation prompts; record prompt version 2 and aligned-input context in manifests.
+- Check provider image limits against the images actually sent.
+- Add offline regression coverage for distinct 2 × 2 tile geography through rendering, requests and cropped results for both providers.
+
 ## 0.6.1 — 2026-10-29
 
 Initial public experimental release.

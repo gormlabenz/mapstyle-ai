@@ -1,8 +1,8 @@
 [general]
 name=MapStyle AI
 description=Create illustrated map backgrounds from overlapping, georeferenced tiles.
-about=Generate illustrated map backgrounds using OpenAI or Google Gemini, with metric tile grids, neighbor continuation and georeferenced results. Requires your own provider API key and separately billed API access. Rendered map inputs, style references, neighboring results and prompts are sent to the selected provider. No additional Python packages required. AI output can alter geographic features and is intended for illustration, not measurement or navigation.
-version=0.6.1
+about=Generate illustrated map backgrounds using OpenAI or Google Gemini, with metric tile grids, neighbor continuation and georeferenced results. Requires your own provider API key and separately billed API access. Rendered map inputs, style references, aligned neighboring overlap strips and prompts are sent to the selected provider. No additional Python packages required. AI output can alter geographic features and is intended for illustration, not measurement or navigation.
+version=0.6.2
 qgisMinimumVersion=3.44
 author=Gorm Labenz
 email=gorm@labenz.io
@@ -10,7 +10,7 @@ homepage=https://github.com/gormlabenz/mapstyle-ai#readme
 repository=https://github.com/gormlabenz/mapstyle-ai
 tracker=https://github.com/gormlabenz/mapstyle-ai/issues
 icon=icon.png
-changelog=0.6.1 - Initial public experimental release: metric tile grids, multiple style references, provider/model size profiles, neighbor-aware generation, three overlap treatments and encrypted QGIS credential storage.
+changelog=0.6.2 - Fix repeated neighbor geography in generated tiles by sending only spatially aligned overlap strips in the target map input.
 tags=cartography,raster,illustration,artificial intelligence,image generation
 qgisMaximumVersion=3.99
 deprecated=False

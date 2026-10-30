@@ -1130,8 +1130,7 @@ class BackgroundPanel(QDockWidget):
             if self.plan['halo'] <= 0:
                 raise ValueError('Use a context margin greater than zero for seamless connections.')
             parents = dependencies(tiles, self.seam_sources)
-            validate_image_count(intent['provider'], intent['model'], len(intent['references']),
-                                 max((len(ids) for ids in parents.values()), default=0))
+            validate_image_count(intent['provider'], intent['model'], len(intent['references']))
             base = self._output_directory()
             settings = self._render_settings()
             directory = base / (datetime.now().strftime('generation-%Y%m%d-%H%M%S-') + uuid.uuid4().hex[:6])
@@ -1167,7 +1166,7 @@ class BackgroundPanel(QDockWidget):
                             request_timeout_seconds=DEFAULT_TIMEOUT_MS // 1000,
                             clip_results=intent['clip'], overlap_mode=intent['overlap_mode'],
                             references=reference_records, user_prompt=intent['user_prompt'],
-                            prompt_version=PROMPT_VERSION, api_enabled=True,
+                            prompt_version=PROMPT_VERSION, neighbor_context='aligned_input_strips', api_enabled=True,
                             tiles=[dict(tile.record(), state='queued', dependencies=parents[tile.name]) for tile in tiles])
             self._generation_records = {tile.name:dict(directory=str(directory), manifest=manifest, tile=tile)
                                         for tile in tiles}
@@ -1207,8 +1206,7 @@ class BackgroundPanel(QDockWidget):
         record = self._generation_records[name]
         record.update(prepared)
         self.exported[name] = record
-        prompt = continuation_prompt(self.generation_manifest['prompt'], prepared['neighbors'], prepared['protected'],
-                                     len(self.generation_manifest['references']))
+        prompt = continuation_prompt(self.generation_manifest['prompt'], prepared['neighbors'], prepared['protected'])
         for entry in self.generation_manifest['tiles']:
             if entry['id'] == name:
                 entry.update(input_png=f'inputs/{name}.png', input_tif=f'inputs/{name}.tif',
