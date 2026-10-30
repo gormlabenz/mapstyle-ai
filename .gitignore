@@ -13,6 +13,5 @@ test-output/
 htmlcov/
 /local/
 /ahrensburg/
-/examples/mapstyle-ai-test/
-
 /examples/
+/mapstyle_ai.*.zip
