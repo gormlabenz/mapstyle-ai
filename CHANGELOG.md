@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.6.4] - 2026-10-30
+
+- Clarify how AI transforms QGIS layers into styled map tiles in plugin descriptions, help and documentation.
+- Replace the plugin logo with the supplied SVG and its matching PNG for QGIS and the plugin directory.
+
 ## [0.6.3] - 2026-10-30
 
 - Run all six isolated QGIS checks and package loading on GitHub Actions with QGIS 3 LTR.

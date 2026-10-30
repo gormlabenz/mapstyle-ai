@@ -204,7 +204,7 @@ class BackgroundPanel(QDockWidget):
         heading.addWidget(title)
         heading.addStretch()
         heading.addWidget(help_button('MapStyle AI',
-            'Create illustrated, georeferenced map backgrounds from your QGIS layers. '
+            'Generate styled map tiles from your QGIS layers using AI. '
             'Choose input layers, set an area, select tiles and add style references or describe your desired style. '
             'Generation sends the selected map images, reference and prompt to your provider and uses paid API credits. '
             'API keys can be saved securely in QGIS authentication storage. Generated results appear as QGIS layers.'))

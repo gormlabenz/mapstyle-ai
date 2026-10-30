@@ -1,6 +1,6 @@
 # MapStyle AI
 
-Create illustrated, georeferenced map backgrounds in QGIS using OpenAI or Google Gemini.
+MapStyle AI transforms your QGIS layers into map backgrounds in a style of your choice by generating new tiles with AI. Describe the look you want or provide reference images. The generated tiles are georeferenced and loaded directly into your project.
 
 ## Requirements and installation
 

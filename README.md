@@ -1,10 +1,10 @@
-# MapStyle AI · QGIS 3.44 · Version 0.6.3
+# MapStyle AI · QGIS 3.44 · Version 0.6.4
 
-A QGIS plugin for illustrated, georeferenced map backgrounds from existing map layers, style references and/or a style description. Uses QGIS, Qt and GDAL without additional Python packages.
+MapStyle AI transforms your QGIS layers into map backgrounds in a style of your choice by generating new tiles with AI. Describe the look you want or provide reference images. The generated tiles are georeferenced and loaded directly into your project. Uses QGIS, Qt and GDAL without additional Python packages.
 
 ## Install and start
 
-Download [MapStyle AI 0.6.3](https://github.com/gormlabenz/mapstyle-ai/releases/tag/v0.6.3), then use **Plugins → Manage and Install Plugins → Install from ZIP** in QGIS 3.44 or later (QGIS 3 series). Enable MapStyle AI and open it from the Plugins menu or toolbar. This is an **experimental** release; QGIS repository approval is pending.
+Download [MapStyle AI 0.6.4](https://github.com/gormlabenz/mapstyle-ai/releases/tag/v0.6.4), then use **Plugins → Manage and Install Plugins → Install from ZIP** in QGIS 3.44 or later (QGIS 3 series). Enable MapStyle AI and open it from the Plugins menu or toolbar. This is an **experimental** release; QGIS repository approval is pending.
 
 Choose input layers and an area, select a tile size, enter your own provider API key, add a style reference and/or description, choose an output folder, and generate selected tiles. See the [quick-start guide](mapstyle_ai/README.md), [changelog](CHANGELOG.md) and [release procedure](docs/releasing.md).
 
@@ -91,7 +91,7 @@ python3 scripts/package.py
 python3 -m unittest discover -s tests -v
 ```
 
-The install script refuses to overwrite an existing installation. The installable ZIP is `dist/mapstyle_ai-0.6.3.zip`.
+The install script refuses to overwrite an existing installation. The installable ZIP is `dist/mapstyle_ai-0.6.4.zip`.
 
 Offline QGIS checks on this Mac:
 
